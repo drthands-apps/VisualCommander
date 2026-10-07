@@ -1,7 +1,11 @@
-﻿using System.Collections.ObjectModel;
-using System.ComponentModel;
+﻿using System;
+using System.IO;
 using System.Linq;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
+
 
 namespace VisualCommander.Models
 {
@@ -32,6 +36,54 @@ namespace VisualCommander.Models
         public string DisplayText =>
             string.IsNullOrWhiteSpace(Texto) ? "(línea vacía)" : Texto;
 
+        private int _numeroLinea;
+        public int NumeroLinea
+        {
+            get => _numeroLinea;
+            set
+            {
+                if (_numeroLinea == value) return;
+                _numeroLinea = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(TextContador));
+            }
+        }
+
+        private int _totalLineas;
+        public int TotalLineas
+        {
+            get => _totalLineas;
+            set
+            {
+                if (_totalLineas == value) return;
+                _totalLineas = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(TextContador));
+            }
+        }
+
+        /// <summary>Texto para el contador, tipo "3/12".</summary>
+        public string TextContador => $"{NumeroLinea}/{TotalLineas}";
+
+
+        private bool _esActiva;
+        public bool EsActiva
+        {
+            get => _esActiva;
+            set
+            {
+                if (_esActiva == value) return;
+                _esActiva = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(EsCerrada));
+            }
+        }
+
+        /// <summary>
+        /// Inverso de EsActiva. Lo usa el ItemsControl para pintar solo las líneas cerradas.
+        /// </summary>
+        public bool EsCerrada => !EsActiva;
+
         private Token? _comandoActivo;
         /// <summary>Último comando de la línea (cerrado por operadores).</summary>
         public Token? ComandoActivo
@@ -46,6 +98,61 @@ namespace VisualCommander.Models
                 ReconstruirModificadores();
             }
         }
+
+        private string _directorioTrabajo = Environment.CurrentDirectory;
+        /// <summary>
+        /// Directorio donde se ejecutarán los comandos de esta línea.
+        /// Se hereda de la línea anterior al crearla, y puede cambiarse
+        /// manualmente o por detección de un `cd` en el texto.
+        /// </summary>
+        public string DirectorioTrabajo
+        {
+            get => _directorioTrabajo;
+            set
+            {
+                if (_directorioTrabajo == value) return;
+                _directorioTrabajo = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(PromptCmd));
+                OnPropertyChanged(nameof(NivelPeligroDirectorio));
+            }
+        }
+
+        /// <summary>
+        /// Prompt que se muestra en la consola simulada para esta línea.
+        /// </summary>
+        public string PromptCmd => DirectorioTrabajo + ">";
+
+        /// <summary>
+        /// Nivel de peligro del directorio de esta línea:
+        /// 0 = normal, 1 = sistema, 2 = raíz de unidad.
+        /// </summary>
+        public int NivelPeligroDirectorio
+        {
+            get
+            {
+                var dir = DirectorioTrabajo.TrimEnd('\\').ToLowerInvariant();
+
+                // Raíz de unidad: "c:" tras quitar la barra final.
+                if (dir.Length == 2 && dir[1] == ':') return 2;
+
+                // Directorios críticos.
+                string[] criticos =
+                {
+            @"c:\windows",
+            @"c:\program files",
+            @"c:\program files (x86)",
+            @"c:\programdata",
+            @"c:\users\default",
+            @"c:\$recycle.bin"
+        };
+                foreach (var c in criticos)
+                    if (dir == c || dir.StartsWith(c + "\\")) return 1;
+
+                return 0;
+            }
+        }
+
 
         /// <summary>Título que se muestra sobre el panel de modificadores.</summary>
         public string TituloModificadores =>
@@ -174,6 +281,16 @@ namespace VisualCommander.Models
             if (token != null)
                 Tokens.Remove(token);
         }
+        /// <summary>
+        /// Reemplaza todos los tokens por una nueva lista, en bloque.
+        /// Se usa al parsear texto introducido a mano.
+        /// </summary>
+        public void ReemplazarCon(IEnumerable<Token> nuevos)
+        {
+            Tokens.Clear();
+            foreach (var t in nuevos)
+                Tokens.Add(t);
+        }
 
         // ==== INotifyPropertyChanged ====
 
@@ -181,5 +298,33 @@ namespace VisualCommander.Models
 
         protected void OnPropertyChanged([CallerMemberName] string? nombre = null)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nombre));
+
+        /// <summary>
+        /// Analiza la línea y devuelve el directorio de trabajo que debería
+        /// tener la siguiente línea, si esta contiene un `cd` o `pushd` con
+        /// una ruta válida. Si no aplica, devuelve null.
+        /// </summary>
+        public string? CalcularDirectorioSiguiente()
+        {
+            if (Tokens.Count == 0) return null;
+
+            // El primer token debe ser cd o pushd.
+            var primero = Tokens[0].Texto.ToLowerInvariant();
+            if (primero != "cd" && primero != "pushd") return null;
+
+            // Buscamos el primer token que parezca una ruta (saltándonos /D y similares).
+            for (int i = 1; i < Tokens.Count; i++)
+            {
+                var t = Tokens[i];
+                if (t.Tipo != TipoToken.Ruta) continue;
+
+                // El Origen de un Token.Ruta guarda la ruta absoluta.
+                if (t.Origen is string ruta && Directory.Exists(ruta))
+                    return ruta;
+            }
+
+            return null;
+        }
+
     }
 }

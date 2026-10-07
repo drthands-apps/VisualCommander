@@ -1,0 +1,232 @@
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+
+namespace VisualCommander.Models
+{
+    /// <summary>
+    /// Convierte una cadena de comando en una lista de Tokens.
+    /// Parseo heurístico: no es perfecto, pero cubre la mayoría de casos.
+    /// </summary>
+    public static class ComandoParser
+    {
+        /// <summary>
+        /// Parsea un texto de línea de comandos y devuelve la lista de tokens.
+        /// </summary>
+        /// <param name="texto">La línea tal cual la escribió el usuario.</param>
+        /// <param name="catalogo">Catálogo para resolver nombres de comando.</param>
+        /// <param name="directorioTrabajo">Para resolver rutas relativas.</param>
+        public static List<Token> Parsear(
+            string texto,
+            IEnumerable<Comando> catalogo,
+            string directorioTrabajo)
+        {
+            var resultado = new List<Token>();
+            if (string.IsNullOrWhiteSpace(texto)) return resultado;
+
+            var partes = DividirRespetandoComillas(texto);
+            var dict = catalogo.ToDictionary(c => c.Nombre, StringComparer.OrdinalIgnoreCase);
+
+            bool primerToken = true;
+
+            foreach (var parte in partes)
+            {
+                if (string.IsNullOrWhiteSpace(parte)) continue;
+                resultado.Add(Clasificar(parte, dict, directorioTrabajo, primerToken));
+                primerToken = false;
+            }
+
+            return resultado;
+        }
+
+        // ==================== Clasificación de un trozo ====================
+
+        private static Token Clasificar(
+            string trozo,
+            Dictionary<string, Comando> catalogo,
+            string directorioTrabajo,
+            bool esPrimero)
+        {
+            var limpio = trozo.Trim('"');
+
+            // 1) ¿Es un comando del catálogo?
+            if (esPrimero && catalogo.TryGetValue(limpio, out var cmd))
+            {
+                return new Token
+                {
+                    Tipo = TipoToken.Comando,
+                    Texto = cmd.Nombre,
+                    Descripcion = $"{cmd.Resumen}\n{cmd.Descripcion}",
+                    Color = cmd.ColorFamilia,
+                    Icono = cmd.Icono,
+                    Origen = cmd
+                };
+            }
+
+            // 2) ¿Empieza por / o -? → parámetro
+            if (limpio.StartsWith("/") || limpio.StartsWith("-"))
+            {
+                return new Token
+                {
+                    Tipo = TipoToken.Parametro,
+                    Texto = trozo,
+                    Color = "E2EFDA",
+                    Icono = "🔧",
+                    Descripcion = "Parámetro"
+                };
+            }
+
+            // 3) ¿Operadores de shell?
+            if (limpio is "|" or "&" or "&&" or "||" or ">" or ">>" or "<")
+            {
+                return new Token
+                {
+                    Tipo = TipoToken.Operador,
+                    Texto = trozo,
+                    Color = "FCE4D6",
+                    Icono = "⏵",
+                    Descripcion = $"Operador: {limpio}"
+                };
+            }
+
+            // 4) ¿Contiene una variable %...%?
+            if (limpio.Contains('%'))
+            {
+                return new Token
+                {
+                    Tipo = TipoToken.Variable,
+                    Texto = trozo,
+                    Color = "E4D7F5",
+                    Icono = "📌",
+                    Descripcion = "Variable de entorno"
+                };
+            }
+
+
+
+            // 5) ¿Es un patrón de archivo? (*.txt, foto*.jpg, *.*)
+            if (EsPatronArchivo(limpio))
+            {
+                return new Token
+                {
+                    Tipo = TipoToken.Texto,           // sigue siendo texto
+                    Texto = trozo,
+                    Color = "FFF2CC",                 // amarillo muy pálido
+                    Icono = "🔎",
+                    Descripcion = "Patrón de archivos"
+                };
+            }
+
+
+
+            // 6) ¿Parece una ruta? (absoluta o relativa existente)
+            var comoRuta = IntentarComoRuta(limpio, directorioTrabajo);
+            if (comoRuta != null)
+            {
+                var esCarpeta = Directory.Exists(comoRuta);
+                return new Token
+                {
+                    Tipo = TipoToken.Ruta,
+                    Texto = trozo.Contains(' ') ? $"\"{limpio}\"" : trozo,
+                    Color = "DEEBF7",
+                    Icono = esCarpeta ? "📁" : "📄",
+                    Descripcion = (esCarpeta ? "Carpeta: " : "Archivo: ") + comoRuta,
+                    Origen = comoRuta
+                };
+            }
+
+            // 7) Texto genérico
+            return new Token
+            {
+                Tipo = TipoToken.Texto,
+                Texto = trozo,
+                Color = "EDEDED",
+                Icono = "📝",
+                Descripcion = "Texto"
+            };
+        }
+
+        /// <summary>Helper para determinar si un string es un patrón de archivo.</summary>
+        private static bool EsPatronArchivo(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return false;
+            // Contiene * o ? pero no es una ruta válida con drive.
+            if (!s.Contains('*') && !s.Contains('?')) return false;
+            if (s.Length >= 2 && s[1] == ':') return false; // C:\algo\*
+            return true;
+        }
+
+        // ==================== Detección de rutas ====================
+
+        private static string? IntentarComoRuta(string texto, string directorioTrabajo)
+        {
+            try
+            {
+                // Rutas absolutas (C:\...) → siempre se aceptan.
+                if (Path.IsPathRooted(texto))
+                {
+                    var full = Path.GetFullPath(texto);
+                    if (Directory.Exists(full) || File.Exists(full)) return full;
+                    // Aceptamos igualmente rutas absolutas que no existan:
+                    // pueden ser el destino de un copy/move.
+                    return full;
+                }
+
+                // Rutas relativas → resolvemos contra el directorio de trabajo.
+                // Solo las aceptamos si existen, para no confundir "hola"
+                // con una ruta relativa.
+                var combinada = Path.Combine(directorioTrabajo, texto);
+                var fullRelativa = Path.GetFullPath(combinada);
+                if (Directory.Exists(fullRelativa) || File.Exists(fullRelativa))
+                    return fullRelativa;
+            }
+            catch
+            {
+                // Cualquier error de Path → no es una ruta.
+            }
+
+            return null;
+        }
+
+        // ==================== Tokenizador ====================
+
+        /// <summary>
+        /// Divide por espacios respetando comillas dobles.
+        /// "copy \"archivo con espacios.txt\" destino" → ["copy", "\"archivo con espacios.txt\"", "destino"]
+        /// </summary>
+        private static List<string> DividirRespetandoComillas(string texto)
+        {
+            var partes = new List<string>();
+            var sb = new StringBuilder();
+            bool dentroComillas = false;
+
+            foreach (var c in texto)
+            {
+                if (c == '"')
+                {
+                    dentroComillas = !dentroComillas;
+                    sb.Append(c);
+                }
+                else if (char.IsWhiteSpace(c) && !dentroComillas)
+                {
+                    if (sb.Length > 0)
+                    {
+                        partes.Add(sb.ToString());
+                        sb.Clear();
+                    }
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+
+            if (sb.Length > 0) partes.Add(sb.ToString());
+            return partes;
+        }
+
+      
+    }
+}

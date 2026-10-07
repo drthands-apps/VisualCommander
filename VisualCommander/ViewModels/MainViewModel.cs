@@ -1,10 +1,10 @@
 ﻿using System;
+using System.IO;
+using System.Windows;
 using System.Diagnostics;
 using System.Text;
-using System.Windows;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -31,17 +31,102 @@ namespace VisualCommander.ViewModels
         public ObservableCollection<LineaComando> Lineas { get; } = new();
 
         private LineaComando _lineaActiva = null!;
-        /// <summary>Línea que se está editando en el constructor visual.</summary>
         public LineaComando LineaActiva
         {
             get => _lineaActiva;
             set
             {
+                // Protección contra nulos: nunca dejamos el ViewModel sin línea activa.
+                if (value is null) return;
                 if (ReferenceEquals(_lineaActiva, value)) return;
+
+                if (_lineaActiva != null)
+                {
+                    _lineaActiva.PropertyChanged -= LineaActiva_PropertyChanged;
+                    _lineaActiva.EsActiva = false;
+                }
+
                 _lineaActiva = value;
+
+                if (_lineaActiva != null)
+                {
+                    _lineaActiva.PropertyChanged += LineaActiva_PropertyChanged;
+                    _lineaActiva.EsActiva = true;
+                }
+
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(DirectorioTrabajo));
+                OnPropertyChanged(nameof(PromptCmd));
+                OnPropertyChanged(nameof(NivelPeligroDirectorio));
             }
         }
+
+
+
+        /// <summary>
+        /// Cuando la línea activa cambia su directorio, replicamos el cambio
+        /// en las propiedades delegadas del ViewModel para que la UI se actualice.
+        /// </summary>
+        private void LineaActiva_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            // Si por alguna razón la línea activa ha quedado en null, no notificamos.
+            if (_lineaActiva is null) return;
+
+            if (e.PropertyName == nameof(LineaComando.DirectorioTrabajo) ||
+                e.PropertyName == nameof(LineaComando.PromptCmd) ||
+                e.PropertyName == nameof(LineaComando.NivelPeligroDirectorio))
+            {
+                OnPropertyChanged(nameof(DirectorioTrabajo));
+                OnPropertyChanged(nameof(PromptCmd));
+                OnPropertyChanged(nameof(NivelPeligroDirectorio));
+            }
+        }
+
+        // ==== Contexto de ejecución (delegado a la línea activa) ====
+
+        /// <summary>Directorio de trabajo de la línea activa.</summary>
+        public string DirectorioTrabajo => LineaActiva.DirectorioTrabajo;
+
+        /// <summary>Prompt de la línea activa.</summary>
+        public string PromptCmd => LineaActiva.PromptCmd;
+
+        /// <summary>Nivel de peligro del directorio de la línea activa.</summary>
+        public int NivelPeligroDirectorio => LineaActiva.NivelPeligroDirectorio;
+
+        /// <summary>
+        /// Cambia el directorio de trabajo de la línea activa.
+        /// Valida que exista.
+        /// </summary>
+        public void CambiarDirectorioTrabajo(string nuevaRuta)
+        {
+            if (string.IsNullOrWhiteSpace(nuevaRuta))
+            {
+                SetStatus("Ruta vacía");
+                return;
+            }
+
+            try
+            {
+                var full = System.IO.Path.GetFullPath(nuevaRuta);
+
+                if (!System.IO.Directory.Exists(full))
+                {
+                    SetStatus($"El directorio no existe: {full}");
+                    return;
+                }
+
+                LineaActiva.DirectorioTrabajo = full;
+                SetStatus($"Directorio de trabajo: {full}");
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Ruta inválida: {ex.Message}");
+            }
+        }
+
+
+
+
 
         // ==== Estado de ejecución ====
 
@@ -100,10 +185,6 @@ namespace VisualCommander.ViewModels
             private set { _status = value; OnPropertyChanged(); }
         }
 
-        
-
-        /// <summary>Ruta actual del sistema para simular el prompt de CMD.</summary>
-        public string PromptCmd => Environment.CurrentDirectory + ">";
 
         // ==== Propiedades calculadas ====
 
@@ -134,19 +215,113 @@ namespace VisualCommander.ViewModels
 
             // Creamos la primera línea.
             _lineaActiva = new LineaComando();
+            _lineaActiva.EsActiva = true;
             Lineas.Add(_lineaActiva);
+            RenumerarLineas();
+            Lineas.CollectionChanged += (_, _) => RenumerarLineas();
+
+
+        }
+
+        private void RenumerarLineas()
+        {
+            for (int i = 0; i < Lineas.Count; i++)
+            {
+                Lineas[i].NumeroLinea = i + 1;
+                Lineas[i].TotalLineas = Lineas.Count;
+            }
         }
 
         // ==== Gestión de líneas ====
 
-        public void NuevaLinea()
+        // ==== Gestión de líneas ====
+
+        /// <summary>
+        /// Cierra la línea activa y crea una nueva justo después.
+        /// Si la activa estaba vacía, simplemente se reutiliza.
+        /// </summary>
+        public void CerrarYCrearSiguiente()
         {
-            var nueva = new LineaComando();
-            Lineas.Add(nueva);
+            var actual = LineaActiva;
+
+            // Si la línea actual está vacía, no creamos una nueva: la reutilizamos.
+            if (string.IsNullOrWhiteSpace(actual.Texto))
+            {
+                SetStatus("La línea actual ya está vacía");
+                return;
+            }
+
+            // ¿Cambio de directorio declarado? (cd / pushd)
+            var nuevoDir = actual.CalcularDirectorioSiguiente();
+
+            // Creamos la nueva línea.
+            var nueva = new LineaComando
+            {
+                DirectorioTrabajo = nuevoDir ?? actual.DirectorioTrabajo
+            };
+
+            // Insertamos justo después de la activa.
+            var idx = Lineas.IndexOf(actual);
+            if (idx < 0) idx = Lineas.Count - 1;
+            Lineas.Insert(idx + 1, nueva);
+
             LineaActiva = nueva;
-            SetStatus($"Nueva línea creada ({Lineas.Count} en total)");
+
+            if (nuevoDir != null)
+                SetStatus($"Nueva línea en {nuevoDir}");
+            else
+                SetStatus($"Nueva línea en {nueva.DirectorioTrabajo}");
         }
 
+        /// <summary>
+        /// Cierra la línea activa sin crear una nueva. El foco pasa a la
+        /// siguiente línea existente, o a la anterior si no hay siguiente.
+        /// Si la línea estaba vacía, se elimina.
+        /// </summary>
+        public void CerrarLineaActiva()
+        {
+            var actual = LineaActiva;
+
+            // Si está vacía, la eliminamos.
+            if (string.IsNullOrWhiteSpace(actual.Texto))
+            {
+                if (Lineas.Count <= 1)
+                {
+                    SetStatus("No hay nada que cerrar");
+                    return;
+                }
+                EliminarLineaYLimpiarHuerfanas(actual);
+                return;
+            }
+
+            // Buscamos la siguiente línea (después de la activa).
+            var idx = Lineas.IndexOf(actual);
+            LineaComando? siguiente = idx >= 0 && idx + 1 < Lineas.Count
+                ? Lineas[idx + 1]
+                : (idx > 0 ? Lineas[idx - 1] : null);
+
+            if (siguiente is null)
+            {
+                // No hay otra línea: creamos una vacía al final.
+                var nueva = new LineaComando
+                {
+                    DirectorioTrabajo = actual.DirectorioTrabajo
+                };
+                Lineas.Add(nueva);
+                LineaActiva = nueva;
+            }
+            else
+            {
+                LineaActiva = siguiente;
+            }
+
+            SetStatus("Línea cerrada");
+        }
+
+        /// <summary>
+        /// Elimina la línea activa y limpia cualquier línea vacía huérfana
+        /// que quede entre líneas cerradas.
+        /// </summary>
         public void EliminarLineaActiva()
         {
             if (Lineas.Count <= 1)
@@ -155,14 +330,69 @@ namespace VisualCommander.ViewModels
                 return;
             }
 
-            var aBorrar = LineaActiva;
+            EliminarLineaYLimpiarHuerfanas(LineaActiva);
+        }
+
+        /// <summary>
+        /// Elimina la línea indicada y, tras ello, limpia las líneas vacías
+        /// que queden entre líneas cerradas no vacías. Garantiza que al menos
+        /// haya una línea activa al final.
+        /// </summary>
+        private void EliminarLineaYLimpiarHuerfanas(LineaComando aBorrar)
+        {
             var idx = Lineas.IndexOf(aBorrar);
+            if (idx < 0) return;
+
+            // Elegimos nueva activa antes de borrar.
+            LineaComando nuevaActiva;
+            if (idx + 1 < Lineas.Count)
+                nuevaActiva = Lineas[idx + 1];
+            else if (idx > 0)
+                nuevaActiva = Lineas[idx - 1];
+            else
+                nuevaActiva = aBorrar; // no debería pasar
+
+            // Borramos.
             Lineas.Remove(aBorrar);
 
-            // Elegimos la línea anterior si existe, o la última.
-            LineaActiva = idx > 0 ? Lineas[idx - 1] : Lineas[^1];
+            // Limpiamos vacías huérfanas (no la activa final).
+            LimpiarVaciasIntermedias();
+
+            // Asignamos activa si la que elegimos sigue existiendo.
+            if (Lineas.Contains(nuevaActiva))
+                LineaActiva = nuevaActiva;
+            else
+                LineaActiva = Lineas[^1];
+
             SetStatus($"Línea eliminada ({Lineas.Count} restantes)");
         }
+
+        /// <summary>
+        /// Elimina líneas vacías que estén rodeadas por líneas no vacías.
+        /// Nunca elimina la última línea (que es la "línea viva" de trabajo).
+        /// </summary>
+        private void LimpiarVaciasIntermedias()
+        {
+            for (int i = Lineas.Count - 2; i >= 0; i--)
+            {
+                var l = Lineas[i];
+                if (string.IsNullOrWhiteSpace(l.Texto) && !l.EsActiva)
+                {
+                    // No la borramos si es la única línea vacía justo antes de la activa,
+                    // porque podría ser la "siguiente a editar" tras cerrar la activa.
+                    // Pero si hay otra vacía después, esta es redundante.
+                    bool hayOtraVacia = false;
+                    for (int j = i + 1; j < Lineas.Count; j++)
+                    {
+                        if (string.IsNullOrWhiteSpace(Lineas[j].Texto)) { hayOtraVacia = true; break; }
+                    }
+                    if (hayOtraVacia)
+                        Lineas.RemoveAt(i);
+                }
+            }
+        }
+
+       
 
         // ==== API pública para la línea activa ====
 
@@ -263,6 +493,10 @@ namespace VisualCommander.ViewModels
             SetStatus($"Añadida ruta: {ruta}");
         }
 
+       
+
+
+
         // ==== INotifyPropertyChanged ====
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -322,8 +556,9 @@ namespace VisualCommander.ViewModels
             }
 
             Salida.Clear();
-            AgregarSalida($"> {comando}");
-            AgregarSalida("");
+AgregarSalida($"📂 {DirectorioTrabajo}>");
+AgregarSalida($"> {comando}");
+AgregarSalida("");
 
             EstaEjecutando = true;
             MensajeCmd = "EJECUTANDO...";
@@ -360,7 +595,7 @@ namespace VisualCommander.ViewModels
                 CreateNoWindow = true,
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8,
-                WorkingDirectory = Environment.CurrentDirectory,
+                WorkingDirectory = DirectorioTrabajo,
             };
 
             using var proceso = new Process { StartInfo = psi };

@@ -45,6 +45,16 @@
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="Foreground" Value="{StaticResource CmdPrompt}"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding NivelPeligroDirectorio}" Value="1">
+                    <Setter Property="Foreground" Value="#FFFFD54F"/>
+                    <Setter Property="FontWeight" Value="Bold"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding NivelPeligroDirectorio}" Value="2">
+                    <Setter Property="Foreground" Value="#FFE74C3C"/>
+                    <Setter Property="FontWeight" Value="Bold"/>
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
 
         <Style x:Key="CmdComandoTexto" TargetType="TextBox">
@@ -101,6 +111,32 @@
                     <Setter Property="Background" Value="#FF4A90D9"/>
                 </Trigger>
             </Style.Triggers>
+        </Style>
+
+        <!-- ==== Estilos para la línea activa / cerrada del cuerpo CMD ==== -->
+
+        <Style x:Key="CmdLineaContenedor" TargetType="Border">
+            <Setter Property="Padding" Value="12,3,12,3"/>
+            <Setter Property="BorderThickness" Value="4,0,0,0"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+        <Style x:Key="CmdTextoLinea" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Foreground" Value="{StaticResource CmdTexto}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+
+        <Style x:Key="CmdContadorLinea" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="Foreground" Value="#FF5A5A5A"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="8,0,0,0"/>
         </Style>
 
         <Style x:Key="OpButton" TargetType="Button">
@@ -449,55 +485,62 @@
                           ResizeDirection="Columns"
                           ResizeBehavior="PreviousAndNext"
                           ShowsPreview="True"/>
-            
-            <!-- Panel central -->
-            <Grid Grid.Column="2" Margin="3">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*"   MinHeight="140"/>
-                    <RowDefinition Height="5"/>
-                    <RowDefinition Height="*"   MinHeight="120"/>
-                </Grid.RowDefinitions>
 
+                    <!-- ============ PANEL CENTRAL ============ -->
+                    <Grid Grid.Column="2" Margin="3">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"   MinHeight="140"/>
+                            <RowDefinition Height="5"/>
+                            <RowDefinition Height="*"   MinHeight="120"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- ==== Constructor visual (bloques arrastrables) ==== -->
                         <Border Grid.Row="0" Style="{StaticResource Pane}">
                             <DockPanel>
-                                <!-- Cabecera con selector de líneas -->
                                 <Grid DockPanel.Dock="Top" Background="#FFE8F0F8">
                                     <TextBlock Text="CONSTRUCTOR VISUAL DEL COMANDO"
-                       FontWeight="SemiBold" FontSize="11"
-                       Foreground="#FF1F4E79"
-                       Padding="8,5"
-                       VerticalAlignment="Center"/>
+                           FontWeight="SemiBold" FontSize="11"
+                           Foreground="#FF1F4E79"
+                           Padding="8,5"
+                           VerticalAlignment="Center"/>
                                     <StackPanel Orientation="Horizontal"
-                        HorizontalAlignment="Right"
-                        Margin="0,3,6,3">
+                            HorizontalAlignment="Right"
+                            Margin="0,3,6,3">
                                         <TextBlock Text="Línea:" VerticalAlignment="Center"
-                           Margin="0,0,4,0" FontSize="11"/>
+                               Margin="0,0,4,0" FontSize="11"/>
                                         <ComboBox x:Name="ComboLineas"
-                          Width="200"
-                          ItemsSource="{Binding Lineas}"
-                          SelectedItem="{Binding LineaActiva}"
-                          DisplayMemberPath="DisplayText"
-                          VerticalContentAlignment="Center"/>
-                                        <Button Content="＋" Width="26" Margin="4,0,0,0"
-                        Padding="0" ToolTip="Nueva línea"
-                        Click="NuevaLinea_Click"/>
-                                        <Button Content="－" Width="26" Margin="2,0,0,0"
-                        Padding="0" ToolTip="Eliminar línea actual"
-                        Click="EliminarLinea_Click"/>
+                              Width="200"
+                              ItemsSource="{Binding Lineas}"
+                              SelectedItem="{Binding LineaActiva}"
+                              DisplayMemberPath="DisplayText"
+                              VerticalContentAlignment="Center"/>
+                                        
+                                        <Button Content="➕ Nueva" Margin="6,0,0,0" Padding="8,2"
+                            FontSize="11"
+                            ToolTip="Crear una nueva línea de comandos"
+                            Click="NuevaLinea_Click"/>
+                                        <Button Content="✓ Cerrar" Margin="4,0,0,0" Padding="8,2"
+                            FontSize="11"
+                            ToolTip="Cerrar la línea activa sin crear una nueva"
+                            Click="CerrarLinea_Click"/>
+                                        <Button Content="🗑 Eliminar" Margin="4,0,0,0" Padding="8,2"
+                            FontSize="11"
+                            ToolTip="Eliminar la línea actual"
+                            Click="EliminarLinea_Click"/>
                                     </StackPanel>
                                 </Grid>
 
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                      VerticalScrollBarVisibility="Auto">
+                          VerticalScrollBarVisibility="Auto">
                                     <ItemsControl x:Name="PanelBloques"
-                          ItemsSource="{Binding LineaActiva.Tokens}"
-                          Margin="8"
-                          AllowDrop="True"
-                          Background="Transparent"
-                          DragEnter="PanelBloques_DragEnter"
-                          DragOver="PanelBloques_DragOver"
-                          DragLeave="PanelBloques_DragLeave"
-                          Drop="PanelBloques_Drop">
+                              ItemsSource="{Binding LineaActiva.Tokens}"
+                              Margin="8"
+                              AllowDrop="True"
+                              Background="Transparent"
+                              DragEnter="PanelBloques_DragEnter"
+                              DragOver="PanelBloques_DragOver"
+                              DragLeave="PanelBloques_DragLeave"
+                              Drop="PanelBloques_Drop">
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate>
                                                 <WrapPanel/>
@@ -506,43 +549,43 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <Border x:Name="BlockRoot"
-                                Style="{StaticResource BlockBase}"
-                                Background="{Binding Color, Converter={StaticResource HexToBrush}}"
-                                BorderBrush="#FF666666"
-                                ToolTip="{Binding Descripcion}"
-                                Cursor="Hand">
+                                    Style="{StaticResource BlockBase}"
+                                    Background="{Binding Color, Converter={StaticResource HexToBrush}}"
+                                    BorderBrush="#FF666666"
+                                    ToolTip="{Binding Descripcion}"
+                                    Cursor="Hand">
                                                     <StackPanel Orientation="Horizontal">
                                                         <TextBlock Text="{Binding Icono}"
-                                           FontSize="13"
-                                           Margin="0,0,6,0"
-                                           VerticalAlignment="Center"/>
+                                               FontSize="13"
+                                               Margin="0,0,6,0"
+                                               VerticalAlignment="Center"/>
                                                         <TextBlock Text="{Binding TextoMostrado}"
-                                           FontFamily="Consolas"
-                                           FontSize="13"
-                                           VerticalAlignment="Center"/>
+                                               FontFamily="Consolas"
+                                               FontSize="13"
+                                               VerticalAlignment="Center"/>
                                                         <Button x:Name="BtnEliminar"
-                                        Content="✕"
-                                        FontSize="10"
-                                        Width="16" Height="16"
-                                        Margin="8,0,0,0"
-                                        Padding="0"
-                                        VerticalAlignment="Center"
-                                        Visibility="Collapsed"
-                                        ToolTip="Eliminar este bloque"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Foreground="#FF666666"
-                                        Cursor="Hand"
-                                        Click="EliminarToken_Click"/>
+                                            Content="✕"
+                                            FontSize="10"
+                                            Width="16" Height="16"
+                                            Margin="8,0,0,0"
+                                            Padding="0"
+                                            VerticalAlignment="Center"
+                                            Visibility="Collapsed"
+                                            ToolTip="Eliminar este bloque"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Foreground="#FF666666"
+                                            Cursor="Hand"
+                                            Click="EliminarToken_Click"/>
                                                     </StackPanel>
                                                 </Border>
                                                 <DataTemplate.Triggers>
                                                     <Trigger SourceName="BlockRoot"
-                                     Property="IsMouseOver"
-                                     Value="True">
+                                         Property="IsMouseOver"
+                                         Value="True">
                                                         <Setter TargetName="BtnEliminar"
-                                        Property="Visibility"
-                                        Value="Visible"/>
+                                            Property="Visibility"
+                                            Value="Visible"/>
                                                     </Trigger>
                                                 </DataTemplate.Triggers>
                                             </DataTemplate>
@@ -551,125 +594,241 @@
                                 </ScrollViewer>
                             </DockPanel>
                         </Border>
+
                         <GridSplitter Grid.Row="1"
-              Height="5"
-              Style="{StaticResource SplitterHorizontal}"                
-              HorizontalAlignment="Stretch"
-              VerticalAlignment="Center"
-              ResizeDirection="Rows"
-              ResizeBehavior="PreviousAndNext"
-              ShowsPreview="True"/>
+                  Height="5"
+                  Style="{StaticResource SplitterHorizontal}"/>
 
-                <Border Grid.Row="2" Style="{StaticResource Pane}">
-                    <DockPanel>
-                                <Border Grid.Row="2" Style="{StaticResource Pane}" Margin="0,3,0,0">
+                        <!-- ==== Bloque CMD (línea de comandos resultante) ==== -->
+                        <Border Grid.Row="2" Style="{StaticResource Pane}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- Cabecera SIMULACIÓN + estado -->
+                                <Border Grid.Row="0"
+                    Background="{StaticResource CmdCabecera}"
+                    BorderBrush="{StaticResource CmdBorde}"
+                    BorderThickness="0,0,0,1"
+                    Padding="0,4">
                                     <Grid>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto"/>
-                                            <RowDefinition Height="*"/>
-                                        </Grid.RowDefinitions>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="▶"
+                                   FontFamily="Consolas"
+                                   FontSize="11"
+                                   Foreground="{StaticResource CmdAviso}"
+                                   VerticalAlignment="Center"
+                                   Margin="10,0,6,0"/>
+                                            <TextBlock Text="{Binding MensajeCmd}"
+                                   Style="{StaticResource CmdCabeceraTexto}"/>
+                                        </StackPanel>
 
-                                        <!-- Cabecera: marca de SIMULACIÓN + estado -->
-                                        <Border Grid.Row="0"
-                Background="{StaticResource CmdCabecera}"
-                BorderBrush="{StaticResource CmdBorde}"
-                BorderThickness="0,0,0,1"
-                Padding="0,4">
-                                            <Grid>
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="▶"
-                                                        FontFamily="Consolas"
-                                                        FontSize="11"
-                                                        Foreground="{StaticResource CmdAviso}"
-                                                        VerticalAlignment="Center"
-                                                        Margin="10,0,6,0"/>
-                                                    <TextBlock Text="{Binding MensajeCmd}"
-               Style="{StaticResource CmdCabeceraTexto}"/>
-                                                </StackPanel>
-
-                                                <StackPanel Orientation="Horizontal"
-            HorizontalAlignment="Right"
-            Margin="0,0,10,0">
-                                                    <Ellipse Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,6,0">
-                                                        <Ellipse.Style>
-                                                            <Style TargetType="Ellipse">
-                                                                <Setter Property="Fill" Value="{StaticResource CmdPrompt}"/>
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding EstaEjecutando}" Value="True">
-                                                                        <Setter Property="Fill" Value="{StaticResource CmdAviso}"/>
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </Ellipse.Style>
-                                                    </Ellipse>
-                                                    <TextBlock FontFamily="Consolas" FontSize="11"
-               Foreground="{StaticResource CmdTexto}"
-               VerticalAlignment="Center">
-                                                        <TextBlock.Style>
-                                                            <Style TargetType="TextBlock">
-                                                                <Setter Property="Text" Value="listo"/>
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding EstaEjecutando}" Value="True">
-                                                                        <Setter Property="Text" Value="ejecutando..."/>
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </TextBlock.Style>
-                                                    </TextBlock>
-                                                </StackPanel>
-                                            </Grid>
-                                        </Border>
-
-                                        <!-- Cuerpo CMD: prompt + comando + cursor -->
-                                        <Border Grid.Row="1"
-                Background="{StaticResource CmdFondo}"
-                BorderBrush="{StaticResource CmdBorde}"
-                BorderThickness="1,0,1,1"
-                Padding="12,14,12,14"
-                MinHeight="70">
-                                            <DockPanel>
-                                                <!-- Prompt -->
-                                                <TextBlock DockPanel.Dock="Left"
-                           Text="{Binding PromptCmd}"
-                           Style="{StaticResource CmdPromptTexto}"
-                           Margin="0,0,8,0"/>
-
-                                                <!-- Cursor parpadeante (a la derecha, dockeado) -->
-                                                <Border DockPanel.Dock="Right"
-                        x:Name="CursorSimulado"
-                        Width="9"
-                        Height="18"
-                        Background="{StaticResource CmdTexto}"
-                        Margin="4,0,0,0"
-                        VerticalAlignment="Center">
-                                                    <Border.Triggers>
-                                                        <EventTrigger RoutedEvent="Border.Loaded">
-                                                            <BeginStoryboard>
-                                                                <Storyboard RepeatBehavior="Forever">
-                                                                    <DoubleAnimation
-                                        Storyboard.TargetProperty="Opacity"
-                                        From="1" To="0"
-                                        Duration="0:0:0.5"
-                                        AutoReverse="True"/>
-                                                                </Storyboard>
-                                                            </BeginStoryboard>
-                                                        </EventTrigger>
-                                                    </Border.Triggers>
-                                                </Border>
-
-                                                <!-- Comando (fill del centro) -->
-                                                <TextBox Text="{Binding LineaActiva.Texto, Mode=OneWay}"
-                         Style="{StaticResource CmdComandoTexto}"
-                         AcceptsReturn="False"/>
-                                            </DockPanel>
-                                        </Border>
+                                        <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                Margin="0,0,10,0">
+                                            <Ellipse Width="8" Height="8"
+                                 VerticalAlignment="Center"
+                                 Margin="0,0,6,0">
+                                                <Ellipse.Style>
+                                                    <Style TargetType="Ellipse">
+                                                        <Setter Property="Fill" Value="{StaticResource CmdPrompt}"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding EstaEjecutando}" Value="True">
+                                                                <Setter Property="Fill" Value="{StaticResource CmdAviso}"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Ellipse.Style>
+                                            </Ellipse>
+                                            <TextBlock FontFamily="Consolas" FontSize="11"
+                                   Foreground="{StaticResource CmdTexto}"
+                                   VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Text" Value="listo"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding EstaEjecutando}" Value="True">
+                                                                <Setter Property="Text" Value="ejecutando..."/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
                                     </Grid>
                                 </Border>
-                       </DockPanel>
-                </Border>
-            </Grid>
 
-            <GridSplitter Grid.Row="3"
+                                <!-- Barra de contexto: directorio de trabajo -->
+                                <Border Grid.Row="1"
+                    Background="#FF151515"
+                    BorderBrush="{StaticResource CmdBorde}"
+                    BorderThickness="0,0,0,1"
+                    Padding="10,5">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="📂"
+                               FontSize="12"
+                               VerticalAlignment="Center"
+                               Margin="0,0,6,0"/>
+                                        <TextBlock Text="Directorio de trabajo:"
+                               FontFamily="Consolas"
+                               FontSize="11"
+                               Foreground="#FF9A9A9A"
+                               VerticalAlignment="Center"
+                               Margin="0,0,6,0"/>
+                                        <TextBlock Text="{Binding DirectorioTrabajo}"
+                               FontFamily="Consolas"
+                               FontSize="11"
+                               Foreground="{StaticResource CmdTexto}"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               MaxWidth="400"
+                               ToolTip="{Binding DirectorioTrabajo}"/>
+                                        <Button Content="Cambiar..."
+                            Margin="10,0,0,0"
+                            Padding="8,1"
+                            FontSize="10"
+                            Click="CambiarDirectorio_Click"
+                            ToolTip="Seleccionar otro directorio de trabajo"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Cuerpo CMD: lista de líneas + editor al final -->
+                                <Border Grid.Row="2"
+                    Background="{StaticResource CmdFondo}">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                                        <StackPanel Margin="0,8,0,8">
+
+                                            <!-- Todas las líneas del plan, apiladas -->
+                                            <ItemsControl ItemsSource="{Binding Lineas}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="Auto"/>
+                                                                <RowDefinition Height="*"/>
+                                                                <RowDefinition Height="Auto"/>
+                                                            </Grid.RowDefinitions>
+
+                                                            <!-- Borde superior animado -->
+                                                            <Border x:Name="BordeSuperior"
+                        Grid.Row="0"
+                        Height="2"
+                        Background="{StaticResource CmdAcento}"
+                        HorizontalAlignment="Center"
+                        Width="0"/>
+
+                                                            <!-- Contenido de la línea -->
+                                                            <Border x:Name="LineaContenedor"
+                        Grid.Row="1"
+                        Padding="12,3,12,3"
+                        BorderThickness="4,0,0,0"
+                        BorderBrush="Transparent"
+                        Background="Transparent"
+                        Cursor="Hand"
+                        MouseLeftButtonDown="LineaClic_MouseLeftButtonDown">
+                                                                <DockPanel>
+                                                                    <!-- Círculo activo -->
+                                                                    <Ellipse x:Name="CirculoActivo"
+                                 DockPanel.Dock="Left"
+                                 Width="8" Height="8"
+                                 Fill="{StaticResource CmdPrompt}"
+                                 VerticalAlignment="Center"
+                                 Margin="0,0,8,0"
+                                 Visibility="Collapsed"/>
+
+                                                                    <!-- Contador -->
+                                                                    <TextBlock x:Name="ContadorLinea"
+                                   DockPanel.Dock="Right"
+                                   FontFamily="Consolas"
+                                   FontSize="10"
+                                   Foreground="#FF5A5A5A"
+                                   VerticalAlignment="Center"
+                                   Margin="8,0,0,0"
+                                   Text="{Binding TextContador}"
+                                   Visibility="Collapsed"/>
+
+                                                                    <!-- Prompt -->
+                                                                    <TextBlock DockPanel.Dock="Left"
+                                   Text="{Binding PromptCmd}"
+                                   Style="{StaticResource CmdPromptTexto}"
+                                   Margin="0,0,8,0"/>
+
+                                                                    <!-- Texto (modo lectura) -->
+                                                                    <TextBlock x:Name="TextoLectura"
+                                   FontFamily="Consolas"
+                                   FontSize="14"
+                                   Foreground="{StaticResource CmdTexto}"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Text="{Binding Texto}"/>
+
+                                                                    <!-- Editor (modo edición) -->
+                                                                    <TextBox x:Name="TextoEdicion"
+                                 FontFamily="Consolas"
+                                 FontSize="14"
+                                 Foreground="{StaticResource CmdTexto}"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Padding="0"
+                                 Margin="0"
+                                 VerticalContentAlignment="Center"
+                                 AcceptsReturn="False"
+                                 CaretBrush="{StaticResource CmdTexto}"
+                                 Text="{Binding Texto, Mode=OneWay}"
+                                 Visibility="Collapsed"
+                                 KeyDown="EditorComando_KeyDown"
+                                 LostFocus="EditorComando_LostFocus"
+                                 IsVisibleChanged="EditorComando_IsVisibleChanged"/>
+                                                                </DockPanel>
+                                                            </Border>
+
+                                                            <!-- Borde inferior animado -->
+                                                            <Border x:Name="BordeInferior"
+                        Grid.Row="2"
+                        Height="2"
+                        Background="{StaticResource CmdAcento}"
+                        HorizontalAlignment="Center"
+                        Width="0"/>
+                                                        </Grid>
+
+                                                        <DataTemplate.Triggers>
+                                                            <DataTrigger Binding="{Binding EsActiva}" Value="True">
+                                                                <!-- Contenedor -->
+                                                                <Setter TargetName="LineaContenedor" Property="Background" Value="#FF181818"/>
+                                                                <Setter TargetName="LineaContenedor" Property="BorderBrush" Value="{StaticResource CmdAcento}"/>
+
+                                                                <!-- Adornos -->
+                                                                <Setter TargetName="CirculoActivo" Property="Visibility" Value="Visible"/>
+                                                                <Setter TargetName="ContadorLinea" Property="Visibility" Value="Visible"/>
+
+                                                                <!-- Intercambio lectura/edición -->
+                                                                <Setter TargetName="TextoLectura" Property="Visibility" Value="Collapsed"/>
+                                                                <Setter TargetName="TextoEdicion" Property="Visibility" Value="Visible"/>
+
+                                                                <!-- Bordes animados -->
+                                                                <Setter TargetName="BordeSuperior" Property="Visibility" Value="Visible"/>
+                                                                <Setter TargetName="BordeInferior" Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </DataTemplate.Triggers>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
+                                            <!-- Editor de la línea activa -->
+                                           
+
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </Border>
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <GridSplitter Grid.Row="3"
               Height="5"
               Style="{StaticResource SplitterHorizontal}"            
               HorizontalAlignment="Stretch"

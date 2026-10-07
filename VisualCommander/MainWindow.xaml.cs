@@ -23,6 +23,14 @@ namespace VisualCommander
 
             ViewModel = new MainViewModel();
             DataContext = ViewModel;
+
+            // Cada vez que cambia la línea activa, forzamos el foco al editor.
+            ViewModel.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(MainViewModel.LineaActiva))
+                    EnfocarEditorActivo();
+            };
+
             // Auto-scroll del panel de salida cada vez que se añade una línea.
             ViewModel.Salida.CollectionChanged += (_, e) =>
             {
@@ -197,10 +205,13 @@ namespace VisualCommander
             DragDrop.DoDragDrop((DependencyObject)sender, datos, DragDropEffects.Copy);
         }
         private void NuevaLinea_Click(object sender, RoutedEventArgs e)
-    => ViewModel.NuevaLinea();
+            => ViewModel.CerrarYCrearSiguiente();
 
         private void EliminarLinea_Click(object sender, RoutedEventArgs e)
             => ViewModel.EliminarLineaActiva();
+
+        private void CerrarLinea_Click(object sender, RoutedEventArgs e)
+            => ViewModel.CerrarLineaActiva();
 
         private async void Ejecutar_Click(object sender, RoutedEventArgs e)
         {
@@ -306,5 +317,189 @@ namespace VisualCommander
             }
             return null;
         }
+        private void CambiarDirectorio_Click(object sender, RoutedEventArgs e)
+        {
+            var dialogo = new Microsoft.Win32.OpenFolderDialog
+            {
+                Title = "Seleccionar directorio de trabajo",
+                InitialDirectory = ViewModel.DirectorioTrabajo
+            };
+
+            if (dialogo.ShowDialog() == true)
+            {
+                ViewModel.CambiarDirectorioTrabajo(dialogo.FolderName);
+            }
+        }
+        private void Prompt_DragEnter(object sender, DragEventArgs e)
+        {
+            e.Effects = e.Data.GetDataPresent(FormatoRuta)
+                ? DragDropEffects.Move
+                : DragDropEffects.None;
+            e.Handled = true;
+        }
+
+        private void Prompt_DragOver(object sender, DragEventArgs e)
+        {
+            // Igual que DragEnter; en WPF hay que gestionar ambos.
+            e.Effects = e.Data.GetDataPresent(FormatoRuta)
+                ? DragDropEffects.Move
+                : DragDropEffects.None;
+            e.Handled = true;
+        }
+
+        private void Prompt_Drop(object sender, DragEventArgs e)
+        {
+            if (!e.Data.GetDataPresent(FormatoRuta)) return;
+            if (e.Data.GetData(FormatoRuta) is not string ruta) return;
+
+            // Solo aceptamos carpetas, no archivos.
+            if (!System.IO.Directory.Exists(ruta))
+            {
+                ViewModel.SetStatus("Solo se puede cambiar el directorio a una carpeta");
+                e.Handled = true;
+                return;
+            }
+
+            ViewModel.CambiarDirectorioTrabajo(ruta);
+            e.Handled = true;
+        }
+        private void EditorComando_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (sender is not TextBox tb) return;
+            if (tb.DataContext is not LineaComando linea) return;
+
+            if (e.Key == Key.Enter)
+            {
+                // Parsear sobre la línea del TextBox (que debería ser la activa).
+                ParsearYReemplazar(tb, linea);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                tb.Text = linea.Texto;
+                tb.CaretIndex = tb.Text.Length;
+                e.Handled = true;
+            }
+        }
+
+        private void EditorComando_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is not TextBox tb) return;
+            if (tb.DataContext is not LineaComando linea) return;
+
+            tb.Text = linea.Texto;
+        }
+
+        private static bool TerminaEnOperador(LineaComando linea)
+        {
+            if (linea.Tokens.Count == 0) return false;
+            var ultimo = linea.Tokens[^1].Texto;
+            return ultimo is "|" or "&&" or "||" or "&";
+        }
+
+        private static bool EsComentario(LineaComando linea)
+        {
+            if (linea.Tokens.Count == 0) return false;
+            var primero = linea.Tokens[0].Texto.ToLowerInvariant();
+            return primero == "rem" || primero.StartsWith("::");
+        }
+
+
+
+        private void ParsearYReemplazar(TextBox tb, LineaComando linea)
+        {
+            var texto = tb.Text;
+            if (string.IsNullOrWhiteSpace(texto)) return;
+
+            var tokens = ComandoParser.Parsear(
+                texto,
+                ViewModel.Comandos,
+                linea.DirectorioTrabajo);
+
+            linea.ReemplazarCon(tokens);
+
+            tb.CaretIndex = tb.Text.Length;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                tb.CaretIndex = tb.Text.Length;
+            }), System.Windows.Threading.DispatcherPriority.Background);
+
+            ViewModel.SetStatus($"Línea {linea.NumeroLinea} parseada: {tokens.Count} token(s)");
+        }
+        private void LineaClic_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is FrameworkElement { DataContext: LineaComando linea })
+            {
+                ViewModel.LineaActiva = linea;
+
+                // Buscamos el TextBox de esa línea y le damos foco.
+                var textBox = FindVisualChild<TextBox>((DependencyObject)sender);
+                if (textBox != null)
+                {
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        textBox.Focus();
+                        textBox.CaretIndex = textBox.Text.Length;
+                    }), System.Windows.Threading.DispatcherPriority.Background);
+                }
+
+                e.Handled = true;
+            }
+        }
+
+        /// <summary>Busca un hijo visual del tipo T recursivamente.</summary>
+        private static T? FindVisualChild<T>(DependencyObject padre) where T : DependencyObject
+        {
+            for (int i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(padre); i++)
+            {
+                var hijo = System.Windows.Media.VisualTreeHelper.GetChild(padre, i);
+                if (hijo is T encontrado) return encontrado;
+                var subHijo = FindVisualChild<T>(hijo);
+                if (subHijo != null) return subHijo;
+            }
+            return null;
+        }
+        private void EditorComando_IsVisibleChanged(
+    object sender, DependencyPropertyChangedEventArgs e)
+        {
+            // Solo nos interesa cuando pasa a Visible.
+            if (e.NewValue is not true) return;
+
+            if (sender is not TextBox tb) return;
+            if (tb.DataContext is not LineaComando linea || !linea.EsActiva) return;
+
+            // Damos el foco cuando el layout ya esté actualizado.
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                tb.Focus();
+                tb.CaretIndex = tb.Text.Length;
+            }), System.Windows.Threading.DispatcherPriority.Background);
+        }
+        private void EnfocarEditorActivo()
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var itemsControl = FindVisualChild<ItemsControl>(this);
+                if (itemsControl == null) return;
+
+                var generador = itemsControl.ItemContainerGenerator;
+                foreach (var item in itemsControl.Items)
+                {
+                    if (item is not LineaComando linea || !linea.EsActiva) continue;
+
+                    var contenedor = generador.ContainerFromItem(item) as DependencyObject;
+                    if (contenedor == null) continue;
+
+                    var tb = FindVisualChild<TextBox>(contenedor);
+                    if (tb != null)
+                    {
+                        tb.Focus();
+                        tb.CaretIndex = tb.Text.Length;
+                    }
+                    break;
+                }
+            }), System.Windows.Threading.DispatcherPriority.Background);
+        }
+
     }
 }
