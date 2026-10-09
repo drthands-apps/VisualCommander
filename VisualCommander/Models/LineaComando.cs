@@ -195,18 +195,18 @@ namespace VisualCommander.Models
         private readonly Stack<string> _rehacer = new();
 
 
-       
 
 
-       
+
+
 
 
         // ==== Constructor ====
 
         public LineaComando()
         {
-            // No suscribimos a CollectionChanged de Tokens, porque ahora
-            // Tokens es derivado: se reconstruye desde fuera.
+            // Apilamos el estado inicial (vacío) para poder deshacer hasta aquí.
+            ConfirmarEstado();
         }
 
         // ==== API pública (compatible con lo que ya existe) ====
@@ -327,6 +327,8 @@ namespace VisualCommander.Models
                 DirectorioTrabajo = DirectorioTrabajo,
                 Texto = Texto   // ← re-proyecta automáticamente
             };
+            // El constructor ya apiló "". Ahora apilamos el estado real.
+            copia.ConfirmarEstado();
             return copia;
         }
 
@@ -464,6 +466,7 @@ namespace VisualCommander.Models
                 ? pv.Nombre
                 : Texto + " " + pv.Nombre;
             ActualizarDesdeTexto(nuevoTexto);
+            ConfirmarEstado();
         }
 
         private void QuitarTokenParametro(ParametroVista pv)
@@ -473,6 +476,7 @@ namespace VisualCommander.Models
                 .Where(t => !(t.Tipo == TipoToken.Parametro && ReferenceEquals(t.Origen, pv.Parametro)))
                 .Select(t => t.Texto);
             ActualizarDesdeTexto(string.Join(" ", partes));
+            ConfirmarEstado();
         }
 
         // ==== INotifyPropertyChanged ====

@@ -200,3 +200,52 @@ Separación de responsabilidades:
 - [ ] Undo/Redo global (operaciones sobre líneas: crear, mover, borrar)
 - [ ] Mostrar "N cambios disponibles" en la barra de estado
 - [ ] Botones de deshacer/rehacer en la toolbar
+## Pendiente inmediato (2026-10-09)
+
+- [ ] ConfirmarEstado en constructor de LineaComando (apilar "")
+- [ ] ConfirmarEstado en Clonar tras asignar Texto
+- [ ] Verificar ciclo undo/redo completo hasta estado 0
+
+## Después
+- [ ] Commit del estado actual
+- [ ] R.3: drag & drop inserta texto en posición del cursor
+
+## Visión: port a Linux (futuro lejano)
+
+Si Visual Commander llega a ser funcional y estable en Windows, plantear
+un port a Linux es un reto interesante. Consideraciones:
+- El motor de tokens/texto es agnóstico de plataforma.
+- El catálogo sería otro JSON con comandos de bash/zsh.
+- La apariencia CMD se adaptaría a terminal (colores, prompt).
+- Muchas features (simulación, undo/redo, multi-línea) son reutilizables.
+- Cambios necesarios: ejecución de procesos, rutas (/, ~), variables ($VAR).
+- No urgente. Requiere que Windows esté consolidado primero.
+
+## Programas auxiliares históricos a incluir en el catálogo
+
+Recopilación de comandos clásicos de Windows que conviene añadir:
+- `format` (formatear unidades) — comando clásico y peligroso
+- `chkdsk` (verificar disco)
+- `sfc` (verificador de archivos de sistema)
+- `diskpart` (particionado avanzado)
+- `bcdboot`, `bcdedit` (arranque)
+- `reg` (registro de Windows)
+- `wmic` (instrumentación)
+- `takeown`, `icacls` (permisos)
+- `attrib` (atributos de archivo)
+- `cipher` (cifrado)
+- `compact` (compresión)
+- `label`, `vol`, `chkntfs`
+- `net user`, `net share`, `net use` (red)
+- `sc` (servicios)
+- `shutdown`, `logoff`
+- `driverquery`, `wmic`
+- `schtasks` (tareas programadas)
+- `assoc`, `ftype` (asociaciones de archivos)
+- `mklink` (enlaces simbólicos)
+- `robocopy` (ya lo tenemos)
+- `xcopy` (ya lo tenemos)
+- Y los clásicos: `tree`, `dir`, `copy`, `move`, `del` (ya los tenemos)
+
+Todos se pueden declarar en `comandos.json` sin recompilar.
+Los peligrosos llevan `peligroso: true` y simulador si es posible.

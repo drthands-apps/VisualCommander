@@ -9,7 +9,7 @@
         WindowStyle="SingleBorderWindow"
         ResizeMode="CanResize"
         WindowState="Maximized"
-        Title="Visual Commander — Constructor visual de línea de comandos"
+        Title="Visual CMD Studio — Constructor visual de línea de comandos"
         Height="880" Width="1560"
         MinHeight="600" MinWidth="1100"
         WindowStartupLocation="CenterScreen"
@@ -226,7 +226,7 @@
                 <MenuItem Header="Documentación de comandos" InputGestureText="F1"/>
                 <MenuItem Header="Atajos de teclado"/>
                 <Separator/>
-                <MenuItem Header="Acerca de Visual Commander..."/>
+                <MenuItem Header="Acerca de Visual CMD Studio..."/>
             </MenuItem>
         </Menu>
 
@@ -264,7 +264,7 @@
                 <TextBlock x:Name="StatusModo" Text="Modo: Comando a comando"/>
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right">
-                <TextBlock Text="Visual Commander · C# · WPF · .NET 10"/>
+                <TextBlock Text="Visual CMD Studio · C# · WPF · .NET 10"/>
             </StatusBarItem>
         </StatusBar>
 
