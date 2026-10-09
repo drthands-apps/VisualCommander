@@ -14,7 +14,9 @@
         MinHeight="600" MinWidth="1100"
         WindowStartupLocation="CenterScreen"
         FontFamily="Segoe UI" FontSize="12"
-        Background="#FFF5F5F5">
+        Background="#FFF5F5F5"
+        PreviewKeyDown="Window_PreviewKeyDown">
+        
 
     <Window.Resources>
 
@@ -160,8 +162,16 @@
         </Style>
 
     </Window.Resources>
+    <Window.InputBindings>
+        <KeyBinding Key="C" Modifiers="Ctrl" Command="{x:Null}" />
+        <KeyBinding Key="X" Modifiers="Ctrl" Command="{x:Null}" />
+        <KeyBinding Key="V" Modifiers="Ctrl" Command="{x:Null}" />
+        <KeyBinding Key="D" Modifiers="Ctrl" Command="{x:Null}" />
+    </Window.InputBindings>
+
 
     <DockPanel>
+        
         <!-- Menú superior -->
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_Archivo">
@@ -515,6 +525,30 @@
                               DisplayMemberPath="DisplayText"
                               VerticalContentAlignment="Center"/>
                                         
+                                        
+                                        <Button Content="Editar" Padding="8,2" FontSize="11" Margin="6,0,0,0" Click="MenuAcciones_Click">
+                                            <Button.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="📋 Copiar" Command="{x:Null}" Click="CopiarLinea_Click"/>
+                                                    <MenuItem Header="✂ Cortar" Click="CortarLinea_Click"/>
+                                                    <MenuItem Header="📌 Pegar" Click="PegarLinea_Click"
+                      IsEnabled="{Binding PuedePegar}"/>
+                                                    <Separator/>
+                                                    <MenuItem Header="🔁 Duplicar" Click="DuplicarLinea_Click"/>
+                                                </ContextMenu>
+                                            </Button.ContextMenu>
+                                        </Button>
+                                        <Button Content="▲" Margin="4,0,0,0" Padding="8,2"
+        FontSize="11"
+        ToolTip="Mover la línea activa hacia arriba (Ctrl+Shift+↑)"
+        Click="MoverArriba_Click"
+        IsEnabled="{Binding PuedeSubirActiva}"/>
+                                        <Button Content="▼" Margin="2,0,0,0" Padding="8,2"
+        FontSize="11"
+        ToolTip="Mover la línea activa hacia abajo (Ctrl+Shift+↓)"
+        Click="MoverAbajo_Click"
+        IsEnabled="{Binding PuedeBajarActiva}"/>
+
                                         <Button Content="➕ Nueva" Margin="6,0,0,0" Padding="8,2"
                             FontSize="11"
                             ToolTip="Crear una nueva línea de comandos"
@@ -768,21 +802,21 @@
 
                                                                     <!-- Editor (modo edición) -->
                                                                     <TextBox x:Name="TextoEdicion"
-                                 FontFamily="Consolas"
-                                 FontSize="14"
-                                 Foreground="{StaticResource CmdTexto}"
-                                 Background="Transparent"
-                                 BorderThickness="0"
-                                 Padding="0"
-                                 Margin="0"
-                                 VerticalContentAlignment="Center"
-                                 AcceptsReturn="False"
-                                 CaretBrush="{StaticResource CmdTexto}"
-                                 Text="{Binding Texto, Mode=OneWay}"
-                                 Visibility="Collapsed"
-                                 KeyDown="EditorComando_KeyDown"
-                                 LostFocus="EditorComando_LostFocus"
-                                 IsVisibleChanged="EditorComando_IsVisibleChanged"/>
+         FontFamily="Consolas"
+         FontSize="14"
+         Foreground="{StaticResource CmdTexto}"
+         Background="Transparent"
+         BorderThickness="0"
+         Padding="0"
+         Margin="0"
+         VerticalContentAlignment="Center"
+         AcceptsReturn="False"
+         CaretBrush="{StaticResource CmdTexto}"
+         Text="{Binding Texto, Mode=OneWay}"
+         Visibility="Collapsed"
+         PreviewKeyDown="EditorComando_PreviewKeyDown"
+         LostFocus="EditorComando_LostFocus"
+         IsVisibleChanged="EditorComando_IsVisibleChanged"/>
                                                                 </DockPanel>
                                                             </Border>
 

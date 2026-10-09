@@ -88,6 +88,7 @@ namespace VisualCommander
             if (sender is FrameworkElement { DataContext: Token token })
             {
                 ViewModel.EliminarToken(token);
+                ViewModel.LineaActiva.ConfirmarEstado();
                 e.Handled = true;  // evita que el clic se propague al Border padre
             }
         }
@@ -115,6 +116,7 @@ namespace VisualCommander
                 e.Data.GetData(FormatoComando) is Comando cmd)
             {
                 ViewModel.AgregarComando(cmd);
+                ViewModel.LineaActiva.ConfirmarEstado();
                 e.Handled = true;
                 return;
             }
@@ -205,19 +207,26 @@ namespace VisualCommander
             DragDrop.DoDragDrop((DependencyObject)sender, datos, DragDropEffects.Copy);
         }
         private void NuevaLinea_Click(object sender, RoutedEventArgs e)
-            => ViewModel.CerrarYCrearSiguiente();
+        {
+            ViewModel.LineaActiva.ConfirmarEstado();
+            ViewModel.CerrarYCrearSiguiente();
+            EnfocarEditorActivo();
+        }
 
+        private void CerrarLinea_Click(object sender, RoutedEventArgs e)
+        {
+            ViewModel.LineaActiva.ConfirmarEstado();
+            ViewModel.CerrarLineaActiva();
+            EnfocarEditorActivo();
+        }
         private void EliminarLinea_Click(object sender, RoutedEventArgs e)
             => ViewModel.EliminarLineaActiva();
 
-        private void CerrarLinea_Click(object sender, RoutedEventArgs e)
-            => ViewModel.CerrarLineaActiva();
-
         private async void Ejecutar_Click(object sender, RoutedEventArgs e)
         {
+            ViewModel.LineaActiva.ConfirmarEstado();
             await ViewModel.EjecutarAsync();
         }
-
         private void Detener_Click(object sender, RoutedEventArgs e)
             => ViewModel.DetenerEjecucion();
         private void Simular_Click(object sender, RoutedEventArgs e)
@@ -363,32 +372,9 @@ namespace VisualCommander
             ViewModel.CambiarDirectorioTrabajo(ruta);
             e.Handled = true;
         }
-        private void EditorComando_KeyDown(object sender, KeyEventArgs e)
-        {
-            if (sender is not TextBox tb) return;
-            if (tb.DataContext is not LineaComando linea) return;
+       
 
-            if (e.Key == Key.Enter)
-            {
-                // Parsear sobre la línea del TextBox (que debería ser la activa).
-                ParsearYReemplazar(tb, linea);
-                e.Handled = true;
-            }
-            else if (e.Key == Key.Escape)
-            {
-                tb.Text = linea.Texto;
-                tb.CaretIndex = tb.Text.Length;
-                e.Handled = true;
-            }
-        }
-
-        private void EditorComando_LostFocus(object sender, RoutedEventArgs e)
-        {
-            if (sender is not TextBox tb) return;
-            if (tb.DataContext is not LineaComando linea) return;
-
-            tb.Text = linea.Texto;
-        }
+       
 
         private static bool TerminaEnOperador(LineaComando linea)
         {
@@ -428,23 +414,15 @@ namespace VisualCommander
         }
         private void LineaClic_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            if (sender is FrameworkElement { DataContext: LineaComando linea })
-            {
-                ViewModel.LineaActiva = linea;
+            if (sender is not FrameworkElement { DataContext: LineaComando linea }) return;
 
-                // Buscamos el TextBox de esa línea y le damos foco.
-                var textBox = FindVisualChild<TextBox>((DependencyObject)sender);
-                if (textBox != null)
-                {
-                    Dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        textBox.Focus();
-                        textBox.CaretIndex = textBox.Text.Length;
-                    }), System.Windows.Threading.DispatcherPriority.Background);
-                }
+            if (ReferenceEquals(ViewModel.LineaActiva, linea)) return;
 
-                e.Handled = true;
-            }
+            // Confirmamos el estado de la línea que dejamos atrás.
+            ViewModel.LineaActiva.ConfirmarEstado();
+
+            ViewModel.LineaActiva = linea;
+            e.Handled = true;
         }
 
         /// <summary>Busca un hijo visual del tipo T recursivamente.</summary>
@@ -500,6 +478,177 @@ namespace VisualCommander
                 }
             }), System.Windows.Threading.DispatcherPriority.Background);
         }
+        private void CopiarLinea_Click(object sender, RoutedEventArgs e)
+    => ViewModel.CopiarLineaActiva();
 
+        private void CortarLinea_Click(object sender, RoutedEventArgs e)
+        {
+            ViewModel.CortarLineaActiva();
+            EnfocarEditorActivo();
+        }
+
+        private void PegarLinea_Click(object sender, RoutedEventArgs e)
+        {
+            ViewModel.PegarLinea();
+            EnfocarEditorActivo();
+        }
+
+        private void DuplicarLinea_Click(object sender, RoutedEventArgs e)
+        {
+            ViewModel.DuplicarLineaActiva();
+            EnfocarEditorActivo();
+        }
+        private void MenuAcciones_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.ContextMenu != null)
+            {
+                btn.ContextMenu.PlacementTarget = btn;
+                btn.ContextMenu.IsOpen = true;
+            }
+        }
+        private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            // Si el foco está en un TextBox, primero gestionamos los atajos
+            // que queremos interceptar aunque el foco esté dentro.
+            var focoEnTextBox = Keyboard.FocusedElement is TextBox;
+
+            // Ctrl+Z → deshacer
+            if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Z)
+            {
+                if (ViewModel.LineaActiva.Deshacer())
+                    ViewModel.SetStatus("Deshecho");
+                else
+                    ViewModel.SetStatus("Nada que deshacer");
+                e.Handled = true;
+                return;
+            }
+
+            // Ctrl+Y (o Ctrl+Shift+Z) → rehacer
+            if ((Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Y) ||
+                (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.Z))
+            {
+                if (ViewModel.LineaActiva.Rehacer())
+                    ViewModel.SetStatus("Rehecho");
+                else
+                    ViewModel.SetStatus("Nada que rehacer");
+                e.Handled = true;
+                return;
+            }
+            // Ctrl+D → duplicar línea
+            if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.D)
+            {
+                ViewModel.DuplicarLineaActiva();
+                e.Handled = true;
+                return;
+            }
+
+            // Ctrl+Shift+↑/↓ → mover línea activa
+            if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+            {
+                if (e.Key == Key.Up)
+                {
+                    ViewModel.MoverActivaArriba();
+                    e.Handled = true;
+                    return;
+                }
+                if (e.Key == Key.Down)
+                {
+                    ViewModel.MoverActivaAbajo();
+                    e.Handled = true;
+                    return;
+                }
+            }
+
+            // Ctrl+Enter → cerrar y crear nueva línea
+            if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Enter)
+            {
+                ViewModel.CerrarYCrearSiguiente();
+                EnfocarEditorActivo();
+                e.Handled = true;
+                return;
+            }
+
+            // ===== Atajos solo cuando el foco NO está en un TextBox =====
+
+            if (focoEnTextBox) return;
+
+            if (Keyboard.Modifiers == ModifierKeys.Control)
+            {
+                switch (e.Key)
+                {
+                    case Key.C: ViewModel.CopiarLineaActiva(); e.Handled = true; break;
+                    case Key.X: ViewModel.CortarLineaActiva(); e.Handled = true; break;
+                    case Key.V: ViewModel.PegarLinea(); e.Handled = true; break;
+                }
+            }
+        }
+        private void MoverArriba_Click(object sender, RoutedEventArgs e)
+        {
+            ViewModel.MoverActivaArriba();
+            EnfocarEditorActivo();
+        }
+
+        private void MoverAbajo_Click(object sender, RoutedEventArgs e)
+        {
+            ViewModel.MoverActivaAbajo();
+            EnfocarEditorActivo();
+        }
+        private void EditorComando_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (sender is not TextBox tb) return;
+            if (tb.DataContext is not LineaComando linea) return;
+
+            if (e.Key == Key.Space)
+            {
+                // Empujamos el texto al modelo para que se re-proyecten los tokens.
+                // Escribimos el espacio primero, luego empujamos.
+                EmpujarTextoAlModelo(tb, linea);
+                return; // dejamos que el espacio se escriba normalmente
+            }
+
+            if (e.Key == Key.Enter)
+            {
+                EmpujarTextoAlModelo(tb, linea);
+                linea.ConfirmarEstado();
+                e.Handled = true;
+                return;
+            }
+            else if (e.Key == Key.Escape)
+{
+    // Descartamos los cambios no confirmados: volvemos al texto del modelo.
+    tb.Text = linea.Texto;
+    tb.CaretIndex = tb.Text.Length;
+    e.Handled = true;
+    return;
+}
+        }
+
+        private void EditorComando_GotFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is TextBox tb && tb.DataContext is LineaComando linea)
+            {
+                // Guardamos el estado al empezar a editar.
+                linea.GuardarSnapshot();
+            }
+        }
+
+        private void EditorComando_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is not TextBox tb) return;
+            if (tb.DataContext is not LineaComando linea) return;
+
+            EmpujarTextoAlModelo(tb, linea);
+            linea.ConfirmarEstado();
+        }
+
+        /// <summary>
+        /// Empuja el texto del TextBox al modelo. Solo si hay diferencia.
+        /// </summary>
+        private void EmpujarTextoAlModelo(TextBox tb, LineaComando linea)
+        {
+            if (tb.Text == linea.Texto) return;
+            linea.ActualizarDesdeTexto(tb.Text);
+            ViewModel.SetStatus($"Línea {linea.NumeroLinea} actualizada");
+        }
     }
 }

@@ -1,40 +1,70 @@
 ﻿using System;
-using System.IO;
-using System.Linq;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
-
 
 namespace VisualCommander.Models
 {
     /// <summary>
-    /// Representa una línea de comandos compuesta por una secuencia
-    /// ordenada de tokens. Sabe calcular su propio texto, gestionar
-    /// su comando activo y construir el panel de modificadores.
+    /// Una línea del plan. El TEXTO es la fuente de verdad. Los Tokens
+    /// son una proyección calculada que se usa para pintar la vista visual.
     /// </summary>
     public class LineaComando : INotifyPropertyChanged
     {
-        // ==== Estado ====
+        // ==== Fuente de verdad: el texto ====
 
-        /// <summary>Tokens que forman esta línea.</summary>
-        public ObservableCollection<Token> Tokens { get; } = new();
-
-        /// <summary>Modificadores del comando activo, listos para la UI.</summary>
-        public ObservableCollection<ParametroVista> Modificadores { get; } = new();
-
+        private string _texto = "";
         /// <summary>
-        /// Texto plano resultante: une los textos de todos los tokens
-        /// (excepto los separadores) con espacios.
+        /// Texto de la línea. Es la fuente de verdad. Cuando cambia,
+        /// se re-proyectan los tokens automáticamente.
         /// </summary>
-        public string Texto =>
-            string.Join(" ", Tokens.Where(t => t.Tipo != TipoToken.Separador)
-                                   .Select(t => t.Texto));
+        public string Texto
+        {
+            get => _texto;
+            set
+            {
+                if (_texto == value) return;
+                _texto = value ?? "";
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(DisplayText));
+                ReprojectarTokens();
+            }
+        }
 
         /// <summary>Texto para mostrar en selectores; evita cadenas vacías.</summary>
         public string DisplayText =>
             string.IsNullOrWhiteSpace(Texto) ? "(línea vacía)" : Texto;
+
+        // ==== Proyección: los tokens ====
+
+        /// <summary>
+        /// Tokens derivados del texto. Se reconstruye cada vez que el
+        /// texto cambia. NO se debe modificar directamente.
+        /// </summary>
+        public ObservableCollection<Token> Tokens { get; } = new();
+
+        /// <summary>Modificadores del comando activo, para el panel derecho.</summary>
+        public ObservableCollection<ParametroVista> Modificadores { get; } = new();
+
+        // ==== Estado de la línea ====
+
+        private bool _esActiva;
+        public bool EsActiva
+        {
+            get => _esActiva;
+            set
+            {
+                if (_esActiva == value) return;
+                _esActiva = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(EsCerrada));
+            }
+        }
+
+        public bool EsCerrada => !EsActiva;
 
         private int _numeroLinea;
         public int NumeroLinea
@@ -62,49 +92,11 @@ namespace VisualCommander.Models
             }
         }
 
-        /// <summary>Texto para el contador, tipo "3/12".</summary>
         public string TextContador => $"{NumeroLinea}/{TotalLineas}";
 
-
-        private bool _esActiva;
-        public bool EsActiva
-        {
-            get => _esActiva;
-            set
-            {
-                if (_esActiva == value) return;
-                _esActiva = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(EsCerrada));
-            }
-        }
-
-        /// <summary>
-        /// Inverso de EsActiva. Lo usa el ItemsControl para pintar solo las líneas cerradas.
-        /// </summary>
-        public bool EsCerrada => !EsActiva;
-
-        private Token? _comandoActivo;
-        /// <summary>Último comando de la línea (cerrado por operadores).</summary>
-        public Token? ComandoActivo
-        {
-            get => _comandoActivo;
-            private set
-            {
-                if (ReferenceEquals(_comandoActivo, value)) return;
-                _comandoActivo = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(TituloModificadores));
-                ReconstruirModificadores();
-            }
-        }
+        // ==== Directorio de trabajo ====
 
         private string _directorioTrabajo = Environment.CurrentDirectory;
-        /// <summary>
-        /// Directorio donde se ejecutarán los comandos de esta línea.
-        /// Se hereda de la línea anterior al crearla, y puede cambiarse
-        /// manualmente o por detección de un `cd` en el texto.
-        /// </summary>
         public string DirectorioTrabajo
         {
             get => _directorioTrabajo;
@@ -118,34 +110,24 @@ namespace VisualCommander.Models
             }
         }
 
-        /// <summary>
-        /// Prompt que se muestra en la consola simulada para esta línea.
-        /// </summary>
         public string PromptCmd => DirectorioTrabajo + ">";
 
-        /// <summary>
-        /// Nivel de peligro del directorio de esta línea:
-        /// 0 = normal, 1 = sistema, 2 = raíz de unidad.
-        /// </summary>
         public int NivelPeligroDirectorio
         {
             get
             {
                 var dir = DirectorioTrabajo.TrimEnd('\\').ToLowerInvariant();
-
-                // Raíz de unidad: "c:" tras quitar la barra final.
                 if (dir.Length == 2 && dir[1] == ':') return 2;
 
-                // Directorios críticos.
                 string[] criticos =
                 {
-            @"c:\windows",
-            @"c:\program files",
-            @"c:\program files (x86)",
-            @"c:\programdata",
-            @"c:\users\default",
-            @"c:\$recycle.bin"
-        };
+                    @"c:\windows",
+                    @"c:\program files",
+                    @"c:\program files (x86)",
+                    @"c:\programdata",
+                    @"c:\users\default",
+                    @"c:\$recycle.bin"
+                };
                 foreach (var c in criticos)
                     if (dir == c || dir.StartsWith(c + "\\")) return 1;
 
@@ -153,37 +135,133 @@ namespace VisualCommander.Models
             }
         }
 
+        /// <summary>
+        /// Texto guardado cuando la línea se activa. Se usa para revertir con Escape.
+        /// </summary>
+        private string? _textoAlActivar;
 
-        /// <summary>Título que se muestra sobre el panel de modificadores.</summary>
+        public void GuardarSnapshot()
+        {
+            _textoAlActivar = Texto;
+        }
+
+       
+
+        public bool TieneSnapshot => _textoAlActivar != null;
+
+        // ==== Comando activo ====
+
+        private Token? _comandoActivo;
+        public Token? ComandoActivo
+        {
+            get => _comandoActivo;
+            private set
+            {
+                if (ReferenceEquals(_comandoActivo, value)) return;
+                _comandoActivo = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(TituloModificadores));
+                ReconstruirModificadores();
+            }
+        }
+
         public string TituloModificadores =>
             ComandoActivo is null
                 ? "MODIFICADORES (sin comando activo)"
                 : $"MODIFICADORES DE: {ComandoActivo.Texto.ToUpperInvariant()}";
 
+        // ==== Sincronización ====
+
+        /// <summary>
+        /// Bandera que impide ciclos cuando una actualización en curso
+        /// dispara otra actualización desde el otro lado.
+        /// </summary>
+        private bool _sincronizando;
+
+        /// <summary>¿Se está aplicando un cambio ahora mismo?</summary>
+        public bool Sincronizando => _sincronizando;
+
+        // ==== Parser inyectado (para la proyección) ====
+
+        /// <summary>
+        /// Función que convierte un texto en una lista de tokens.
+        /// El MainViewModel la asigna al cargar el catálogo.
+        /// </summary>
+        public static Func<string, string, IEnumerable<Token>>? Proyector { get; set; }
+
+       
+
+        /// <summary>Estado actual del undo (rehacer).</summary>
+        private readonly Stack<string> _rehacer = new();
+
+
+       
+
+
+       
+
+
         // ==== Constructor ====
 
         public LineaComando()
         {
-            Tokens.CollectionChanged += (_, _) =>
-            {
-                OnPropertyChanged(nameof(Texto));
-                OnPropertyChanged(nameof(DisplayText));
-                RecalcularComandoActivo();
-            };
+            // No suscribimos a CollectionChanged de Tokens, porque ahora
+            // Tokens es derivado: se reconstruye desde fuera.
         }
 
-        // ==== API pública ====
-
-        /// <summary>Añade un token al final de la línea.</summary>
-        public void AgregarToken(Token token) => Tokens.Add(token);
-
-        /// <summary>Inserta un token en una posición concreta (para el futuro).</summary>
-        public void InsertarToken(Token token, int indice) => Tokens.Insert(indice, token);
+        // ==== API pública (compatible con lo que ya existe) ====
 
         /// <summary>
-        /// Quita un token. Si era un parámetro marcado, desmarca su checkbox
-        /// y deja que el propio checkbox quite el token (evita doble borrado).
+        /// Reemplaza el texto por otro y re-proyecta. Es la operación
+        /// principal de cambio de contenido.
         /// </summary>
+        public void ActualizarDesdeTexto(string nuevoTexto)
+        {
+            if (_sincronizando) return;
+            try
+            {
+                _sincronizando = true;
+                Texto = nuevoTexto;
+            }
+            finally
+            {
+                _sincronizando = false;
+            }
+        }
+
+        /// <summary>
+        /// Reemplaza el texto a partir de una secuencia de tokens.
+        /// Construye el texto uniendo los textos de los tokens con espacios.
+        /// </summary>
+        public void ActualizarDesdeTokens(IEnumerable<Token> tokens)
+        {
+            var nuevoTexto = string.Join(" ",
+                tokens.Where(t => t.Tipo != TipoToken.Separador)
+                      .Select(t => t.Texto));
+            ActualizarDesdeTexto(nuevoTexto);
+        }
+
+        // --- Compatibilidad con la API anterior ---
+
+        /// <summary>Añade un token al final de la línea (equivalente a añadir la palabra al final del texto).</summary>
+        public void AgregarToken(Token token)
+        {
+            var nuevos = Tokens.ToList();
+            nuevos.Add(token);
+            ActualizarDesdeTokens(nuevos);
+        }
+
+        /// <summary>Inserta un token en una posición (para uso futuro).</summary>
+        public void InsertarToken(Token token, int indice)
+        {
+            var nuevos = Tokens.ToList();
+            if (indice < 0) indice = 0;
+            if (indice > nuevos.Count) indice = nuevos.Count;
+            nuevos.Insert(indice, token);
+            ActualizarDesdeTokens(nuevos);
+        }
+
+        /// <summary>Quita un token. Si era un parámetro marcado, desmarca el checkbox.</summary>
         public void QuitarToken(Token token)
         {
             if (token.Tipo == TipoToken.Parametro && token.Origen is Parametro p)
@@ -192,47 +270,156 @@ namespace VisualCommander.Models
                 if (pv is { EstaSeleccionado: true })
                 {
                     pv.EstaSeleccionado = false;
-                    return; // el handler marcará la baja en Tokens
+                    return;
                 }
             }
-            Tokens.Remove(token);
+
+            var nuevos = Tokens.Where(t => !ReferenceEquals(t, token)).ToList();
+            ActualizarDesdeTokens(nuevos);
         }
 
-        /// <summary>Vacía la línea por completo.</summary>
+        /// <summary>Vacía la línea.</summary>
         public void Limpiar()
         {
-            Tokens.Clear();
+            ActualizarDesdeTexto("");
             Modificadores.Clear();
             ComandoActivo = null;
         }
 
-        // ==== Lógica interna ====
+        /// <summary>
+        /// Reemplaza los tokens por una nueva lista. Mantenido por
+        /// compatibilidad con el código anterior (parser desde texto).
+        /// </summary>
+        public void ReemplazarCon(IEnumerable<Token> nuevos)
+        {
+            ActualizarDesdeTokens(nuevos);
+        }
 
         /// <summary>
-        /// Recalcula el comando activo: el último Token de tipo Comando que
-        /// no esté "cerrado" por un operador.
+        /// Devuelve el directorio que debería tener la SIGUIENTE línea,
+        /// si esta contiene un `cd` o `pushd` con ruta válida.
         /// </summary>
+        public string? CalcularDirectorioSiguiente()
+        {
+            if (Tokens.Count == 0) return null;
+
+            var primero = Tokens[0].Texto.ToLowerInvariant();
+            if (primero != "cd" && primero != "pushd") return null;
+
+            for (int i = 1; i < Tokens.Count; i++)
+            {
+                var t = Tokens[i];
+                if (t.Tipo != TipoToken.Ruta) continue;
+                if (t.Origen is string ruta && Directory.Exists(ruta))
+                    return ruta;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Crea una copia independiente de esta línea.
+        /// </summary>
+        public LineaComando Clonar()
+        {
+            var copia = new LineaComando
+            {
+                DirectorioTrabajo = DirectorioTrabajo,
+                Texto = Texto   // ← re-proyecta automáticamente
+            };
+            return copia;
+        }
+
+        // ==== Proyección (interno) ====
+
+        /// <summary>
+        /// Recalcula la colección de tokens a partir del texto actual.
+        /// Se llama automáticamente cuando cambia el Texto.
+        /// </summary>
+        private void ReprojectarTokens()
+        {
+            if (Proyector == null)
+            {
+                // Sin proyector configurado, dejamos los tokens vacíos.
+                // Esto solo ocurriría si el MainViewModel no ha cargado aún.
+                return;
+            }
+
+            IEnumerable<Token> nuevos;
+            try
+            {
+                nuevos = Proyector(Texto, DirectorioTrabajo);
+            }
+            catch
+            {
+                nuevos = Array.Empty<Token>();
+            }
+
+            Tokens.Clear();
+            foreach (var t in nuevos)
+                Tokens.Add(t);
+
+            // Recalcular comando activo.
+            RecalcularComandoActivo();
+        }
+
         private void RecalcularComandoActivo()
         {
             Token? nuevo = null;
             for (int i = Tokens.Count - 1; i >= 0; i--)
             {
                 var t = Tokens[i];
-                if (t.Tipo == TipoToken.Operador)
-                    break;                       // los operadores cierran el comando
-                if (t.Tipo == TipoToken.Comando)
-                {
-                    nuevo = t;
-                    break;
-                }
+                if (t.Tipo == TipoToken.Operador) break;
+                if (t.Tipo == TipoToken.Comando) { nuevo = t; break; }
             }
+
+            // Si el comando activo representa el MISMO comando del catálogo,
+            // no reconstruimos los modificadores: solo sincronizamos los checkboxes.
+            if (ComandoActivo != null &&
+                nuevo != null &&
+                ReferenceEquals(ComandoActivo.Origen, nuevo.Origen))
+            {
+                _comandoActivo = nuevo;  // actualizamos la referencia al token
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(TituloModificadores));
+                SincronizarCheckboxes();
+                return;
+            }
+
+            // En cualquier otro caso, asignamos (lo que dispara reconstrucción).
             ComandoActivo = nuevo;
         }
 
-        /// <summary>Reconstruye la lista de modificadores desde el comando activo.</summary>
+        /// <summary>
+        /// Sincroniza los checkboxes con el estado real de los tokens,
+        /// sin reconstruir la colección.
+        /// </summary>
+        private void SincronizarCheckboxes()
+        {
+            var parametrosPresentes = new HashSet<Parametro>(
+                Tokens
+                    .Where(t => t.Tipo == TipoToken.Parametro && t.Origen is Parametro)
+                    .Select(t => (Parametro)t.Origen!)
+            );
+
+            foreach (var pv in Modificadores)
+            {
+                var deberia = parametrosPresentes.Contains(pv.Parametro);
+                if (pv.EstaSeleccionado != deberia)
+                {
+                    // Desuscribimos para no disparar AgregarTokenParametro/QuitarTokenParametro.
+                    pv.PropertyChanged -= ParametroVista_PropertyChanged;
+                    pv.EstaSeleccionado = deberia;
+                    pv.PropertyChanged += ParametroVista_PropertyChanged;
+                }
+            }
+        }
+
+
+
+
         private void ReconstruirModificadores()
         {
-            // Desuscribimos los anteriores (evitamos fugas de memoria).
             foreach (var old in Modificadores)
                 old.PropertyChanged -= ParametroVista_PropertyChanged;
 
@@ -240,9 +427,20 @@ namespace VisualCommander.Models
 
             if (ComandoActivo?.Origen is not Comando cmd) return;
 
+            // ¿Qué parámetros están presentes en la línea ahora mismo?
+            var parametrosPresentes = new HashSet<Parametro>(
+                Tokens
+                    .Where(t => t.Tipo == TipoToken.Parametro && t.Origen is Parametro)
+                    .Select(t => (Parametro)t.Origen!)
+            );
+
             foreach (var p in cmd.Parametros)
             {
-                var pv = new ParametroVista(p);
+                var pv = new ParametroVista(p)
+                {
+                    // Marcamos según el estado real de la línea.
+                    EstaSeleccionado = parametrosPresentes.Contains(p)
+                };
                 pv.PropertyChanged += ParametroVista_PropertyChanged;
                 Modificadores.Add(pv);
             }
@@ -261,35 +459,20 @@ namespace VisualCommander.Models
 
         private void AgregarTokenParametro(ParametroVista pv)
         {
-            if (pv.Parametro.Unico && Tokens.Any(t => ReferenceEquals(t.Origen, pv.Parametro)))
-                return;
-
-            Tokens.Add(new Token
-            {
-                Tipo = TipoToken.Parametro,
-                Texto = pv.Nombre,
-                Descripcion = pv.Descripcion,
-                Color = "E2EFDA",
-                Icono = "🔧",
-                Origen = pv.Parametro
-            });
+            ConfirmarEstado();  // guarda el estado ANTES de añadir el parámetro
+            var nuevoTexto = string.IsNullOrWhiteSpace(Texto)
+                ? pv.Nombre
+                : Texto + " " + pv.Nombre;
+            ActualizarDesdeTexto(nuevoTexto);
         }
 
         private void QuitarTokenParametro(ParametroVista pv)
         {
-            var token = Tokens.FirstOrDefault(t => ReferenceEquals(t.Origen, pv.Parametro));
-            if (token != null)
-                Tokens.Remove(token);
-        }
-        /// <summary>
-        /// Reemplaza todos los tokens por una nueva lista, en bloque.
-        /// Se usa al parsear texto introducido a mano.
-        /// </summary>
-        public void ReemplazarCon(IEnumerable<Token> nuevos)
-        {
-            Tokens.Clear();
-            foreach (var t in nuevos)
-                Tokens.Add(t);
+            ConfirmarEstado();  // guarda el estado ANTES de quitar el parámetro
+            var partes = Tokens
+                .Where(t => !(t.Tipo == TipoToken.Parametro && ReferenceEquals(t.Origen, pv.Parametro)))
+                .Select(t => t.Texto);
+            ActualizarDesdeTexto(string.Join(" ", partes));
         }
 
         // ==== INotifyPropertyChanged ====
@@ -298,33 +481,92 @@ namespace VisualCommander.Models
 
         protected void OnPropertyChanged([CallerMemberName] string? nombre = null)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nombre));
-
-        /// <summary>
-        /// Analiza la línea y devuelve el directorio de trabajo que debería
-        /// tener la siguiente línea, si esta contiene un `cd` o `pushd` con
-        /// una ruta válida. Si no aplica, devuelve null.
-        /// </summary>
-        public string? CalcularDirectorioSiguiente()
+        public void RestaurarSnapshot()
         {
-            if (Tokens.Count == 0) return null;
-
-            // El primer token debe ser cd o pushd.
-            var primero = Tokens[0].Texto.ToLowerInvariant();
-            if (primero != "cd" && primero != "pushd") return null;
-
-            // Buscamos el primer token que parezca una ruta (saltándonos /D y similares).
-            for (int i = 1; i < Tokens.Count; i++)
+            if (_textoAlActivar != null)
             {
-                var t = Tokens[i];
-                if (t.Tipo != TipoToken.Ruta) continue;
-
-                // El Origen de un Token.Ruta guarda la ruta absoluta.
-                if (t.Origen is string ruta && Directory.Exists(ruta))
-                    return ruta;
+                ActualizarDesdeTexto(_textoAlActivar);
+                _textoAlActivar = null;
             }
-
-            return null;
         }
 
+        /// <summary>
+        /// Confirma el texto actual y lo apila en el historial.
+        /// Se llama tras operaciones confirmadas (Enter, cambio de línea, blur...).
+        /// </summary>
+
+
+
+        // ==== Historial de estados (undo/redo) ====
+
+        private const int MaxHistorial = 100;
+
+        /// <summary>Historial de estados confirmados. El último es el actual.</summary>
+        private readonly List<string> _historial = new();
+
+        /// <summary>Índice del estado actual dentro del historial. -1 = sin historial.</summary>
+        private int _indiceHistorial = -1;
+
+        /// <summary>¿Se puede deshacer?</summary>
+        public bool PuedeDeshacer => _indiceHistorial > 0;
+
+        /// <summary>¿Se puede rehacer?</summary>
+        public bool PuedeRehacer => _indiceHistorial >= 0 && _indiceHistorial < _historial.Count - 1;
+
+        /// <summary>
+        /// Confirma el texto actual como un nuevo punto de restauración.
+        /// Se llama tras operaciones confirmadas por el usuario (Enter, blur,
+        /// cambio de línea, drag & drop, etc.).
+        /// </summary>
+        public void ConfirmarEstado()
+        {
+            // Si estamos en medio de un undo (hay rehacer disponible),
+            // cortamos la cola de rehacer.
+            if (_indiceHistorial < _historial.Count - 1)
+                _historial.RemoveRange(_indiceHistorial + 1, _historial.Count - _indiceHistorial - 1);
+
+            // No apilamos duplicados.
+            if (_historial.Count > 0 && _historial[^1] == Texto)
+                return;
+
+            _historial.Add(Texto);
+            _indiceHistorial = _historial.Count - 1;
+
+            // Acotamos el historial.
+            if (_historial.Count > MaxHistorial)
+            {
+                _historial.RemoveAt(0);
+                _indiceHistorial--;
+            }
+
+            OnPropertyChanged(nameof(PuedeDeshacer));
+            OnPropertyChanged(nameof(PuedeRehacer));
+        }
+
+        /// <summary>Deshace el último cambio confirmado.</summary>
+        public bool Deshacer()
+        {
+            if (!PuedeDeshacer) return false;
+
+            _indiceHistorial--;
+            ActualizarDesdeTexto(_historial[_indiceHistorial]);
+
+            OnPropertyChanged(nameof(PuedeDeshacer));
+            OnPropertyChanged(nameof(PuedeRehacer));
+            return true;
+        }
+
+        /// <summary>Rehace el último cambio deshecho.</summary>
+        public bool Rehacer()
+        {
+            if (!PuedeRehacer) return false;
+
+            _indiceHistorial++;
+            ActualizarDesdeTexto(_historial[_indiceHistorial]);
+
+            OnPropertyChanged(nameof(PuedeDeshacer));
+            OnPropertyChanged(nameof(PuedeRehacer));
+            return true;
+        }
     }
 }

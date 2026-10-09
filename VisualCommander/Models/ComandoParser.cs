@@ -19,9 +19,9 @@ namespace VisualCommander.Models
         /// <param name="catalogo">Catálogo para resolver nombres de comando.</param>
         /// <param name="directorioTrabajo">Para resolver rutas relativas.</param>
         public static List<Token> Parsear(
-            string texto,
-            IEnumerable<Comando> catalogo,
-            string directorioTrabajo)
+     string texto,
+     IEnumerable<Comando> catalogo,
+     string directorioTrabajo)
         {
             var resultado = new List<Token>();
             if (string.IsNullOrWhiteSpace(texto)) return resultado;
@@ -29,25 +29,37 @@ namespace VisualCommander.Models
             var partes = DividirRespetandoComillas(texto);
             var dict = catalogo.ToDictionary(c => c.Nombre, StringComparer.OrdinalIgnoreCase);
 
+            Comando? comandoActual = null;
             bool primerToken = true;
 
             foreach (var parte in partes)
             {
                 if (string.IsNullOrWhiteSpace(parte)) continue;
-                resultado.Add(Clasificar(parte, dict, directorioTrabajo, primerToken));
+
+                var token = Clasificar(parte, dict, directorioTrabajo, primerToken, comandoActual);
+
+                // Actualizamos el comando activo si el token es un comando.
+                if (token.Tipo == TipoToken.Comando && token.Origen is Comando c)
+                    comandoActual = c;
+
+                // Si el token es un operador, reseteamos el comando actual.
+                if (token.Tipo == TipoToken.Operador)
+                    comandoActual = null;
+
+                resultado.Add(token);
                 primerToken = false;
             }
 
             return resultado;
         }
-
         // ==================== Clasificación de un trozo ====================
 
         private static Token Clasificar(
-            string trozo,
-            Dictionary<string, Comando> catalogo,
-            string directorioTrabajo,
-            bool esPrimero)
+    string trozo,
+    Dictionary<string, Comando> catalogo,
+    string directorioTrabajo,
+    bool esPrimero,
+    Comando? comandoActual)
         {
             var limpio = trozo.Trim('"');
 
@@ -68,17 +80,26 @@ namespace VisualCommander.Models
             // 2) ¿Empieza por / o -? → parámetro
             if (limpio.StartsWith("/") || limpio.StartsWith("-"))
             {
+                // Buscamos si el comando actual tiene este parámetro.
+                Parametro? param = null;
+                if (comandoActual != null)
+                {
+                    param = comandoActual.Parametros.FirstOrDefault(p =>
+                        string.Equals(p.Nombre, limpio, StringComparison.OrdinalIgnoreCase));
+                }
+
                 return new Token
                 {
                     Tipo = TipoToken.Parametro,
                     Texto = trozo,
-                    Color = "E2EFDA",
+                    Color = param?.Tipo == TipoParametro.Lista ? "D9E1F2" : "E2EFDA",
                     Icono = "🔧",
-                    Descripcion = "Parámetro"
+                    Descripcion = param?.Descripcion ?? "Parámetro",
+                    Origen = param   // ← puede ser null si el parámetro no está en el comando
                 };
             }
 
-            // 3) ¿Operadores de shell?
+            // 3) Operadores
             if (limpio is "|" or "&" or "&&" or "||" or ">" or ">>" or "<")
             {
                 return new Token
@@ -91,7 +112,7 @@ namespace VisualCommander.Models
                 };
             }
 
-            // 4) ¿Contiene una variable %...%?
+            // 4) Variables
             if (limpio.Contains('%'))
             {
                 return new Token
@@ -104,24 +125,20 @@ namespace VisualCommander.Models
                 };
             }
 
-
-
-            // 5) ¿Es un patrón de archivo? (*.txt, foto*.jpg, *.*)
+            // 5) Patrones de archivo
             if (EsPatronArchivo(limpio))
             {
                 return new Token
                 {
-                    Tipo = TipoToken.Texto,           // sigue siendo texto
+                    Tipo = TipoToken.Texto,
                     Texto = trozo,
-                    Color = "FFF2CC",                 // amarillo muy pálido
+                    Color = "FFF2CC",
                     Icono = "🔎",
                     Descripcion = "Patrón de archivos"
                 };
             }
 
-
-
-            // 6) ¿Parece una ruta? (absoluta o relativa existente)
+            // 6) Rutas
             var comoRuta = IntentarComoRuta(limpio, directorioTrabajo);
             if (comoRuta != null)
             {
@@ -226,7 +243,5 @@ namespace VisualCommander.Models
             if (sb.Length > 0) partes.Add(sb.ToString());
             return partes;
         }
-
-      
     }
 }

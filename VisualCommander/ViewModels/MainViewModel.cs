@@ -1,16 +1,15 @@
 ﻿using System;
 using System.IO;
-using System.Windows;
-using System.Diagnostics;
-using System.Text;
-using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Linq;
-using System.Runtime.CompilerServices;
+using System.Text;
+using System.Windows;
 using System.Text.Json;
+using System.Diagnostics;
 using System.Windows.Data;
+using System.ComponentModel;
 using VisualCommander.Models;
-
+using System.Collections.ObjectModel;
+using System.Runtime.CompilerServices;
 
 namespace VisualCommander.ViewModels
 {
@@ -58,6 +57,8 @@ namespace VisualCommander.ViewModels
                 OnPropertyChanged(nameof(DirectorioTrabajo));
                 OnPropertyChanged(nameof(PromptCmd));
                 OnPropertyChanged(nameof(NivelPeligroDirectorio));
+                OnPropertyChanged(nameof(PuedeSubirActiva));
+                OnPropertyChanged(nameof(PuedeBajarActiva));
             }
         }
 
@@ -209,18 +210,26 @@ namespace VisualCommander.ViewModels
         {
             CargarComandos();
 
+            // Conectamos el proyector de tokens al parser.
+            LineaComando.Proyector = (texto, dirTrabajo) =>
+                ComandoParser.Parsear(texto, Comandos, dirTrabajo);
             ComandosView = CollectionViewSource.GetDefaultView(Comandos);
             ComandosView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(Comando.Familia)));
             ComandosView.Filter = FiltroComando;
+
+            Lineas.CollectionChanged += (_, _) =>
+            {
+                RenumerarLineas();
+                OnPropertyChanged(nameof(PuedeSubirActiva));
+                OnPropertyChanged(nameof(PuedeBajarActiva));
+            };
 
             // Creamos la primera línea.
             _lineaActiva = new LineaComando();
             _lineaActiva.EsActiva = true;
             Lineas.Add(_lineaActiva);
             RenumerarLineas();
-            Lineas.CollectionChanged += (_, _) => RenumerarLineas();
-
-
+           
         }
 
         private void RenumerarLineas()
@@ -543,7 +552,13 @@ namespace VisualCommander.ViewModels
 
 
 
-        /// <summary>Ejecuta la línea activa y captura la salida en el panel inferior.</summary>
+        /// <summary>Líneas para las que el usuario marcó "no volver a preguntar".</summary>
+        private readonly System.Collections.Generic.HashSet<LineaComando> _lineasNoPreguntar = new();
+
+        /// <summary>
+        /// Ejecuta la línea activa. Antes, si contiene comandos peligrosos y el
+        /// usuario no ha marcado "no preguntar", muestra el diálogo de confirmación.
+        /// </summary>
         public async Task EjecutarAsync()
         {
             if (EstaEjecutando) return;
@@ -555,10 +570,41 @@ namespace VisualCommander.ViewModels
                 return;
             }
 
+            // ¿Hay que confirmar?
+            if (!_lineasNoPreguntar.Contains(LineaActiva))
+            {
+                var simulacion = SimuladorComando.Simular(LineaActiva);
+                if (simulacion.Aplica)
+                {
+                    var dialogo = new ConfirmarEjecucionDialog(
+                        comando,
+                        LineaActiva.DirectorioTrabajo,
+                        simulacion)
+                    {
+                        Owner = System.Windows.Application.Current?.MainWindow
+                    };
+
+                    var resultado = dialogo.ShowDialog();
+
+                    if (resultado != true)
+                    {
+                        SetStatus("Ejecución cancelada por el usuario");
+                        return;
+                    }
+
+                    if (dialogo.NoPreguntarMas)
+                    {
+                        _lineasNoPreguntar.Add(LineaActiva);
+                        SetStatus("No se volverá a preguntar para esta línea");
+                    }
+                }
+            }
+
+            // ----- A partir de aquí, ejecución normal -----
             Salida.Clear();
-AgregarSalida($"📂 {DirectorioTrabajo}>");
-AgregarSalida($"> {comando}");
-AgregarSalida("");
+            AgregarSalida($"📂 {DirectorioTrabajo}>");
+            AgregarSalida($"> {comando}");
+            AgregarSalida("");
 
             EstaEjecutando = true;
             MensajeCmd = "EJECUTANDO...";
@@ -662,5 +708,180 @@ AgregarSalida("");
             else
                 dispatcher.Invoke(accion);
         }
+        // ==== Portapapeles de líneas ====
+
+        /// <summary>
+        /// Última línea copiada o cortada, pendiente de pegar.
+        /// Guardamos una copia completa para conservar todos los metadatos.
+        /// </summary>
+        private LineaComando? _lineaCopiada;
+
+        /// <summary>¿Hay algo que pegar?</summary>
+        public bool PuedePegar => _lineaCopiada != null;
+
+        /// <summary>Copia la línea activa al portapapeles interno y del sistema.</summary>
+        public void CopiarLineaActiva()
+        {
+            _lineaCopiada = LineaActiva.Clonar();
+            OnPropertyChanged(nameof(PuedePegar));
+
+            // También al portapapeles del sistema, como texto plano.
+            try
+            {
+                System.Windows.Clipboard.SetText(LineaActiva.Texto);
+                SetStatus($"Línea {LineaActiva.NumeroLinea} copiada");
+            }
+            catch
+            {
+                SetStatus($"Línea {LineaActiva.NumeroLinea} copiada (solo interno)");
+            }
+        }
+
+        /// <summary>Corta la línea activa: copia + elimina.</summary>
+        public void CortarLineaActiva()
+        {
+            _lineaCopiada = LineaActiva.Clonar();
+            OnPropertyChanged(nameof(PuedePegar));
+
+            try { System.Windows.Clipboard.SetText(LineaActiva.Texto); } catch { }
+
+            // Si es la única línea, solo limpiamos su contenido en lugar de eliminarla.
+            if (Lineas.Count == 1)
+            {
+                LineaActiva.Limpiar();
+                SetStatus("Línea vaciada (no se puede eliminar la única línea)");
+                return;
+            }
+
+            EliminarLineaActiva();
+            SetStatus("Línea cortada");
+        }
+
+        /// <summary>
+        /// Pega la línea copiada justo después de la activa y la deja como activa.
+        /// Si no hay nada en el portapapeles interno, intenta leer del sistema.
+        /// </summary>
+        /// <summary>
+        /// Pega la línea copiada. Reglas:
+        /// 1. Si la activa está vacía, se reutiliza (pegar "en" ella).
+        /// 2. Si la activa NO está vacía y lo pegado también está vacío,
+        ///    no se hace nada (evita crear vacías intermedias).
+        /// 3. En caso contrario, se inserta justo después de la activa.
+        /// </summary>
+        public void PegarLinea()
+        {
+            LineaComando aPegar;
+
+            if (_lineaCopiada != null)
+            {
+                aPegar = _lineaCopiada.Clonar();
+            }
+            else if (System.Windows.Clipboard.ContainsText())
+            {
+                var texto = System.Windows.Clipboard.GetText().Trim();
+                if (string.IsNullOrWhiteSpace(texto))
+                {
+                    SetStatus("Nada que pegar");
+                    return;
+                }
+
+                aPegar = new LineaComando
+                {
+                    DirectorioTrabajo = LineaActiva.DirectorioTrabajo
+                };
+                var tokens = ComandoParser.Parsear(texto, Comandos, aPegar.DirectorioTrabajo);
+                aPegar.ReemplazarCon(tokens);
+            }
+            else
+            {
+                SetStatus("Nada que pegar");
+                return;
+            }
+
+            var activaVacia = string.IsNullOrWhiteSpace(LineaActiva.Texto);
+            var pegadaVacia = string.IsNullOrWhiteSpace(aPegar.Texto);
+
+            // Caso 1: activa vacía → se reutiliza.
+            if (activaVacia)
+            {
+                LineaActiva.ReemplazarCon(aPegar.Tokens.Select(t => new Token
+                {
+                    Tipo = t.Tipo,
+                    Texto = t.Texto,
+                    Descripcion = t.Descripcion,
+                    Color = t.Color,
+                    Icono = t.Icono,
+                    Origen = t.Origen
+                }));
+
+                if (pegadaVacia)
+                    SetStatus("Nada que pegar (contenido vacío)");
+                else
+                    SetStatus($"Pegado en línea {LineaActiva.NumeroLinea}");
+                return;
+            }
+
+            // Caso 2: activa no vacía + pegada vacía → no hacemos nada.
+            if (pegadaVacia)
+            {
+                SetStatus("El contenido copiado está vacío");
+                return;
+            }
+
+            // Caso 3: inserción después de la activa.
+            var idx = Lineas.IndexOf(LineaActiva);
+            if (idx < 0) idx = Lineas.Count - 1;
+            Lineas.Insert(idx + 1, aPegar);
+            LineaActiva = aPegar;
+
+            SetStatus($"Pegado como línea {aPegar.NumeroLinea}");
+        }
+
+        /// <summary>Duplica la línea activa justo después.</summary>
+        public void DuplicarLineaActiva()
+        {
+            var copia = LineaActiva.Clonar();
+            var idx = Lineas.IndexOf(LineaActiva);
+            if (idx < 0) idx = Lineas.Count - 1;
+            Lineas.Insert(idx + 1, copia);
+            LineaActiva = copia;
+
+            SetStatus($"Línea duplicada como {copia.NumeroLinea}");
+        }
+        // ==== Reordenación ====
+
+        /// <summary>¿Puede la línea activa subir en la pila?</summary>
+        public bool PuedeSubirActiva =>
+            Lineas.IndexOf(LineaActiva) > 0;
+
+        /// <summary>¿Puede la línea activa bajar en la pila?</summary>
+        public bool PuedeBajarActiva =>
+            Lineas.IndexOf(LineaActiva) < Lineas.Count - 1;
+
+        /// <summary>Mueve la línea activa una posición arriba.</summary>
+        public void MoverActivaArriba()
+        {
+            var idx = Lineas.IndexOf(LineaActiva);
+            if (idx <= 0) return;
+
+            // Intercambiamos posiciones.
+            Lineas.Move(idx, idx - 1);
+            SetStatus($"Línea movida a la posición {idx}");
+            OnPropertyChanged(nameof(PuedeSubirActiva));
+            OnPropertyChanged(nameof(PuedeBajarActiva));
+        }
+
+        /// <summary>Mueve la línea activa una posición abajo.</summary>
+        public void MoverActivaAbajo()
+        {
+            var idx = Lineas.IndexOf(LineaActiva);
+            if (idx < 0 || idx >= Lineas.Count - 1) return;
+
+            Lineas.Move(idx, idx + 1);
+            SetStatus($"Línea movida a la posición {idx + 2}");
+            OnPropertyChanged(nameof(PuedeSubirActiva));
+            OnPropertyChanged(nameof(PuedeBajarActiva));
+        }
+
     }
 }
